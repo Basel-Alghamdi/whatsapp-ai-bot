@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp ATS Admin</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+      h1,h2 { margin: 0 0 12px; }
+      .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+      label { display: block; margin: 8px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+      button { padding: 8px 12px; border: none; background: #0d6efd; color: #fff; border-radius: 6px; cursor: pointer; }
+      button.secondary { background: #6c757d; }
+      .row { display: flex; gap: 12px; }
+      .col { flex: 1; }
+      ul { padding-left: 18px; }
+      .muted { color: #666; font-size: 12px; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; margin-right: 6px; }
+      .qrow, .rrow { display: flex; gap: 6px; margin-bottom: 6px; }
+      .qrow input, .rrow input { flex: 1; }
+      .list { max-height: 300px; overflow: auto; border: 1px solid #eee; border-radius: 8px; padding: 8px; }
+      .item { padding: 8px; border-bottom: 1px solid #f2f2f2; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script>
+      const e = React.createElement;
+      const { useState, useEffect } = React;
+
+      function TextArea({label, value, set}) {
+        return e('div', {}, [
+          e('label', { key:'l' }, label),
+          e('textarea', { key:'t', rows:4, value: value||'', onChange:(ev)=>set(ev.target.value) })
+        ]);
+      }
+
+      function TextInput({label, value, set}) {
+        return e('div', {}, [
+          e('label', { key:'l' }, label),
+          e('input', { key:'i', value: value||'', onChange:(ev)=>set(ev.target.value) })
+        ]);
+      }
+
+      function DynamicList({label, items, setItems, placeholder}) {
+        const add = () => setItems([...(items||[]), '']);
+        const setIdx = (i, v) => {
+          const c = items.slice(); c[i] = v; setItems(c);
+        };
+        const del = (i) => { const c = items.slice(); c.splice(i,1); setItems(c); };
+        return e('div', {}, [
+          e('label', { key:'l' }, label),
+          e('div', { key:'rows' }, (items||[]).map((it, idx)=> e('div', { className:'qrow', key:idx }, [
+            e('input', { value:it, placeholder, onChange:(ev)=>setIdx(idx, ev.target.value) }),
+            e('button', { className:'secondary', onClick:()=>del(idx) }, 'Remove')
+          ]))),
+          e('button', { key:'b', onClick:add, style:{marginTop:6}}, 'Add')
+        ]);
+      }
+
+      function CreateJob({ onCreated }) {
+        const [title, setTitle] = useState('');
+        const [description, setDescription] = useState('');
+        const [responsibilities, setResponsibilities] = useState('');
+        const [requirements, setRequirements] = useState('');
+        const [skills, setSkills] = useState('');
+        const [benefits, setBenefits] = useState('');
+        const [questions, setQuestions] = useState(['']);
+        const [recipients, setRecipients] = useState(['']);
+        const [busy, setBusy] = useState(false);
+        const submit = async () => {
+          if (!title || questions.filter(Boolean).length === 0) { alert('Title and at least one question required'); return; }
+          setBusy(true);
+          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients }) });
+          setBusy(false);
+          if (!res.ok) return alert('Failed to create job');
+          const data = await res.json();
+          onCreated && onCreated(data.job);
+        };
+        return e('div', { className:'box' }, [
+          e('h2', { key:'h' }, 'Create Job'),
+          TextInput({label:'Job Title', value:title, set:setTitle}),
+          TextArea({label:'Description', value:description, set:setDescription}),
+          TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities}),
+          TextArea({label:'Requirements', value:requirements, set:setRequirements}),
+          TextArea({label:'Skills', value:skills, set:setSkills}),
+          TextArea({label:'Benefits', value:benefits, set:setBenefits}),
+          DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
+          DynamicList({label:'Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
+          e('div', { key:'actions', style:{marginTop:8} }, [
+            e('button', { onClick:submit, disabled:busy }, busy?'Creating...':'Create Job')
+          ])
+        ]);
+      }
+
+      function JobList({ onSelect }) {
+        const [jobs, setJobs] = useState([]);
+        const load = async () => {
+          const res = await fetch('/api/jobs');
+          const data = await res.json();
+          setJobs(data);
+        };
+        useEffect(()=>{ load(); }, []);
+        return e('div', { className:'box' }, [
+          e('h2', { key:'h' }, 'Jobs'),
+          e('div', { key:'list', className:'list' }, jobs.map(j => e('div', { className:'item', key:j.jobId }, [
+            e('div', { key:'t' }, `${j.title} `),
+            e('div', { key:'i', className:'muted' }, j.jobId),
+            e('div', { key:'b', style:{marginTop:6} }, e('button', { onClick: ()=>onSelect(j) }, 'Open'))
+          ])))
+        ]);
+      }
+
+      function JobDetail({ job }) {
+        const [subs, setSubs] = useState([]);
+        const load = async () => {
+          const res = await fetch(`/api/jobs/${job.jobId}/submissions`);
+          const data = await res.json();
+          setSubs(data);
+        };
+        useEffect(()=>{ load(); }, [job.jobId]);
+        return e('div', { className:'box' }, [
+          e('h2', { key:'h' }, job.title),
+          e('div', { key:'meta', className:'muted' }, job.jobId),
+          e('div', { key:'qs' }, [ e('strong', {}, 'Questions:'), e('ul', {}, (job.questions||[]).map((q,i)=> e('li', { key:i }, q))) ]),
+          e('div', { key:'rs' }, [ e('strong', {}, 'Recipients:'), e('div', {}, (job.recipients||[]).map((r,i)=> e('span',{className:'pill',key:i}, r))) ]),
+          e('h3', { key:'sh' }, 'Submissions'),
+          e('div', { key:'list', className:'list' }, (subs||[]).map(s => e('div', { className:'item', key:s._id }, [
+            e('div', {}, `Phone: ${s.applicantPhone}`),
+            e('div', {}, `Score: ${s.aiScore} — Decision: ${s.aiDecision}`),
+            e('details', {}, [
+              e('summary', {}, 'Answers'),
+              e('ul', {}, (s.answers||[]).map((qa,i)=> e('li', { key:i }, `Q: ${qa.question} — A: ${qa.answer}`)))
+            ]),
+            e('details', {}, [
+              e('summary', {}, 'AI Summary'),
+              e('div', {}, [
+                e('div', {}, `Strengths: ${s.aiStrengths}`),
+                e('div', {}, `Weaknesses: ${s.aiWeaknesses}`),
+                e('div', {}, `Summary: ${s.aiSummary}`)
+              ])
+            ])
+          ])))
+        ]);
+      }
+
+      function App() {
+        const [selected, setSelected] = useState(null);
+        const onCreated = (job) => { setSelected(job); };
+        return e('div', {}, [
+          e('h1', { key:'h' }, 'WhatsApp ATS Admin'),
+          e('div', { className:'row', key:'r' }, [
+            e('div', { className:'col', key:'c1' }, e(CreateJob, { onCreated })),
+            e('div', { className:'col', key:'c2' }, selected ? e(JobDetail, { job: selected }) : e(JobList, { onSelect: (j)=>setSelected(j) }))
+          ])
+        ]);
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(e(App));
+    </script>
+  </body>
+  </html>
+

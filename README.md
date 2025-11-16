@@ -1,50 +1,58 @@
-WhatsApp AI Screening Bot
+WhatsApp AI Assessment Platform
 
-Backend for a Twilio WhatsApp chatbot that interviews candidates using HR-provided questions, then generates an AI analysis and score out of 100 for each candidate.
+WhatsApp-based AI assessment flow for applicants with an HR dashboard to create roles, questions, and see submissions — powered by Twilio (WhatsApp), Node.js, MongoDB, and Groq.
 
 Quick Start
 
 - Requirements
   - Node.js 18+
   - Twilio account with WhatsApp Sandbox or WABA number
-  - Groq API key (get one at https://console.groq.com)
+  - Groq API key (https://console.groq.com)
+  - MongoDB (Atlas recommended) — set `MONGODB_URI`
 
 - Setup
-  1) Create or edit a local .env and fill TWILIO_SID, TWILIO_AUTH_TOKEN, GROQ_API_KEY, and optionally TWILIO_WHATSAPP_FROM
-  2) Install deps: npm install
-  3) Start server: npm start (default port 3000)
+  1) Fill `.env` with at least: `TWILIO_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `GROQ_API_KEY`, and `MONGODB_URI`
+  2) Install deps: `npm install`
+  3) Start server: `npm start` (default port 3000)
 
-- Expose webhook
-  - Use a tunnel (e.g., ngrok) to expose the server: ngrok http 3000
-  - In Twilio Console (WhatsApp Sandbox), set WHEN A MESSAGE COMES IN to: https://<your-ngrok-host>/webhook
+- Admin Dashboard
+  - Open http://localhost:3000/admin
+  - Create a Job (title, details, dynamic questions, recipients)
+  - After applicants finish, view submissions (answers + AI summary)
 
-- Create a job
-  POST http://localhost:3000/jobs
-  Content-Type: application/json
-  {
-    "id": "JOB-X",
-    "title": "Account Manager",
-    "introMessage": "Thanks for applying to Account Manager. I will ask a few questions.",
-    "closingMessage": "Thanks! We've recorded your responses.",
-    "hrWebhook": "https://example.com/hr-hook", // optional
-    "questions": [
-      { "id": "q1", "text": "Briefly introduce yourself." },
-      { "id": "q2", "text": "Tell us about your sales experience." },
-      { "id": "q3", "text": "What are your salary expectations?" }
-    ]
-  }
+- Twilio Webhook
+  - Expose server (e.g., `ngrok http 3000`)
+  - In Twilio WhatsApp Sandbox, set WHEN A MESSAGE COMES IN to: `https://<your-host>/webhook`
+  - Applicant sends: "ابدأ عزّام" (or "start") to begin; bot asks questions one by one
 
-- Candidate flow
-  - If there is only one active job, the bot starts immediately upon first message.
-  - If there are multiple jobs, candidates must send the job code (e.g., "JOB-X" or "APPLY JOB-X").
-  - You can share a deep link: https://wa.me/<E164_NUMBER_NO_PLUS>?text=APPLY%20JOB-X
+Data Model
 
-- Fetch a session
-  GET /sessions/:sid returns transcript + AI analysis JSON.
+- Job (MongoDB collection `jobs`)
+  - jobId, title, description, responsibilities, requirements, skills, benefits
+  - questions: [String]
+  - recipients: [String]
+  - createdAt
+
+- Submission (MongoDB collection `submissions`)
+  - applicantPhone, jobId, answers: [{ question, answer }]
+  - aiScore, aiStrengths, aiWeaknesses, aiDecision, aiSummary
+  - createdAt
+
+AI Evaluation
+- Uses Groq’s OpenAI-compatible Chat Completions API: `https://api.groq.com/openai/v1/chat/completions`
+- Default model: `llama-3.1-8b-instant` (override with env `GROQ_MODEL`)
+- Prompt returns strict JSON with: score, strengths, weaknesses, decision, summary
+
+Railway Deployment (Backend)
+
+- Create a Railway project and deploy this repo.
+- Set environment variables (Service → Variables):
+  - `TWILIO_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
+  - `GROQ_API_KEY`, optional `GROQ_MODEL`
+  - `MONGODB_URI` (use MongoDB Atlas connection string), optional `MONGODB_DB`
+- After deploy, set Twilio webhook to `https://<railway-url>/webhook`
 
 Notes
-
-- Data is stored in memory for simplicity. Replace with Redis or a database for production.
-- The webhook is idempotent on MessageSid to prevent duplicate processing on Twilio retries.
-- Uses Groq’s OpenAI-compatible chat completions API at https://api.groq.com/openai/v1/chat/completions. Default model: `llama-3.1-8b-instant` (override with `GROQ_MODEL`).
-- You can add rubric/weights per question and tune prompts in `server.js` (function `analyzeCandidate`).
+- Webhook deduplication handled via Twilio `MessageSid` stored on session documents.
+- First answer per question is stored; subsequent messages do not overwrite.
+- Admin UI is a lightweight React app served from `/admin` (no build step).

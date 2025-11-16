@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const mongoose = require('mongoose');
 
 // Twilio
 const accountSid = process.env.TWILIO_SID;
@@ -19,100 +20,129 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// In-memory stores (swap to Redis/DB in production)
-const jobs = new Map(); // jobId -> { id, title, introMessage, closingMessage, questions: [{id,text,weight,rubric}], hrWebhook }
-const sessions = new Map(); // candidateKey(phone|jobId) -> session
+// MongoDB (optional but recommended)
+const MONGODB_URI = process.env.MONGODB_URI;
+let dbReady = false;
+if (MONGODB_URI) {
+  mongoose
+    .connect(MONGODB_URI, { dbName: process.env.MONGODB_DB || 'whatsapp_ats' })
+    .then(() => {
+      dbReady = true;
+      console.log('MongoDB connected');
+    })
+    .catch((err) => {
+      console.error('MongoDB connection failed:', err.message);
+    });
+} else {
+  console.warn('MONGODB_URI not set. Running without persistence.');
+}
 
-// Seed sample job for quick start (can be replaced via POST /jobs)
+// Schemas & Models
+const JobSchema = new mongoose.Schema(
+  {
+    jobId: { type: String, unique: true, index: true },
+    title: String,
+    description: String,
+    responsibilities: String,
+    requirements: String,
+    skills: String,
+    benefits: String,
+    questions: [String],
+    recipients: [String],
+  },
+  { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
+);
+
+const SessionSchema = new mongoose.Schema(
+  {
+    applicantPhone: { type: String, index: true },
+    jobId: { type: String, index: true },
+    currentIndex: { type: Number, default: 0 },
+    answers: [{ question: String, answer: String }],
+    processedMessageSids: [String],
+    startedAt: { type: Date, default: Date.now },
+    completedAt: { type: Date, default: null },
+  },
+  { timestamps: false }
+);
+
+const SubmissionSchema = new mongoose.Schema(
+  {
+    applicantPhone: { type: String, index: true },
+    jobId: { type: String, index: true },
+    answers: [{ question: String, answer: String }],
+    aiScore: { type: Number, default: 0 },
+    aiStrengths: String,
+    aiWeaknesses: String,
+    aiDecision: String,
+    aiSummary: String,
+    createdAt: { type: Date, default: Date.now },
+  },
+  { timestamps: false }
+);
+
+const Job = mongoose.models.Job || mongoose.model('Job', JobSchema);
+const Session = mongoose.models.Session || mongoose.model('Session', SessionSchema);
+const Submission = mongoose.models.Submission || mongoose.model('Submission', SubmissionSchema);
+
+// Fallback in-memory job if DB missing
+const fallbackJobs = new Map();
 (function seedSampleJob() {
   const id = 'JOB-DEMO';
-  if (!jobs.has(id)) {
-    jobs.set(id, {
-      id,
+  if (!fallbackJobs.has(id)) {
+    fallbackJobs.set(id, {
+      jobId: id,
       title: 'Junior Backend Engineer',
-      introMessage: 'Thanks for applying to Junior Backend Engineer. I will ask you a few quick questions.',
-      closingMessage: 'Thanks! We have recorded your responses. You will hear from us soon.',
-      hrWebhook: process.env.HR_WEBHOOK_URL || '',
+      description: '',
+      responsibilities: '',
+      requirements: '',
+      skills: '',
+      benefits: '',
       questions: [
-        { id: 'q1', text: 'Briefly introduce yourself and your experience.', weight: 1 },
-        { id: 'q2', text: 'What programming languages and frameworks are you most comfortable with?', weight: 2 },
-        { id: 'q3', text: 'Describe a challenging backend problem you solved and how.', weight: 3 },
-        { id: 'q4', text: 'What are your salary expectations and notice period?', weight: 1 }
-      ]
+        'Briefly introduce yourself and your experience.',
+        'What programming languages and frameworks are you most comfortable with?',
+        'Describe a challenging backend problem you solved and how.',
+        'What are your salary expectations and notice period?'
+      ],
+      recipients: [],
+      createdAt: new Date().toISOString(),
     });
   }
 })();
 
 // Helpers
-function candidateKey(from, jobId) {
-  return `${from}|${jobId}`;
+function normalizePhone(waFrom) {
+  return String(waFrom || '').replace(/^whatsapp:/i, '');
 }
 
-function newSession({ from, jobId }) {
-  const id = `S_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const sess = {
-    id,
-    jobId,
-    from,
-    currentIndex: 0,
-    answers: [], // { qid, question, answer, ts }
-    startedAt: new Date().toISOString(),
-    completedAt: null,
-    processedMessageSids: new Set(),
-    analysis: null
-  };
-  sessions.set(candidateKey(from, jobId), sess);
-  return sess;
+function generateJobId() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let x = '';
+  for (let i = 0; i < 6; i++) x += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return `JOB-${x}`;
 }
 
 async function sendWhatsApp(to, body) {
   return client.messages.create({ from: twilioFrom, to, body });
 }
 
-function parseJobCodeFromMessage(message) {
-  if (!message) return null;
-  // Expect formats like: "apply JOB-DEMO" or "JOB-DEMO"
-  const tokenized = message.trim().toUpperCase().split(/\s+/);
-  if (tokenized.length === 1) return tokenized[0];
-  if (tokenized[0] === 'APPLY' && tokenized[1]) return tokenized[1];
-  return null;
-}
+// (legacy helpers removed)
 
-function getOrAskForJob({ message }) {
-  // If only one job, default to it
-  if (jobs.size === 1) {
-    const [single] = jobs.values();
-    return { job: single, needJobCode: false };
-  }
-  const code = parseJobCodeFromMessage(message);
-  if (code && jobs.has(code)) return { job: jobs.get(code), needJobCode: false };
-  return { job: null, needJobCode: true };
-}
-
-function transcriptFromSession(sess) {
-  return sess.answers.map(a => ({ question: a.question, answer: a.answer }));
-}
-
-async function analyzeCandidate(job, sess) {
-  const transcript = transcriptFromSession(sess);
-  const prompt = {
+async function analyzeCandidate(job, answers) {
+  const qa = answers.map(a => ({ question: a.question, answer: a.answer }));
+  const sys = {
     role: 'system',
-    content: `You are an ATS assistant. You will score a candidate between 0 and 100 based on the job and answers. Be fair, concise, specific. Output a strict JSON object with fields: overall_score_percent (0-100), strengths (array of strings), weaknesses (array of strings), per_question (array of {id, question, score_0_100, notes}), decision (one of: strong_yes, yes, maybe, no), summary (short paragraph).`
+    content: 'You are a senior technical interviewer. Be concise, fair, and specific. Always return strict JSON and nothing else.'
   };
 
   const user = {
     role: 'user',
-    content: JSON.stringify({ job: { id: job.id, title: job.title, questions: job.questions }, transcript })
+    content: `You are a senior technical interviewer. Evaluate this applicant strictly based on the role below.\n\nROLE DETAILS:\nTitle: ${job.title}\nDescription: ${job.description || ''}\nResponsibilities: ${job.responsibilities || ''}\nRequirements: ${job.requirements || ''}\nSkills: ${job.skills || ''}\nBenefits: ${job.benefits || ''}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`Q${i+1}: ${x.question}\nA${i+1}: ${x.answer}`).join('\n')}\n\nEvaluate and return a JSON with:\n{\n  "score": "number from 0 to 100",\n  "strengths": "bullet points",\n  "weaknesses": "bullet points",\n  "decision": "Hire / Maybe / Reject",\n  "summary": "one short paragraph"\n}`
   };
 
   try {
-    const resp = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: GROQ_MODEL,
-        messages: [prompt, user],
-        temperature: 0.2,
-      },
+    const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
+      { model: GROQ_MODEL, messages: [sys, user], temperature: 0.2 },
       { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
     );
 
@@ -131,154 +161,195 @@ async function analyzeCandidate(job, sess) {
     return parsed;
   } catch (err) {
     console.error('Groq error:', err?.response?.data || err.message);
-    return {
-      overall_score_percent: 0,
-      strengths: [],
-      weaknesses: [],
-      per_question: transcript.map((qa, idx) => ({ id: job.questions[idx]?.id || `q${idx+1}`, question: qa.question, score_0_100: 0, notes: 'Scoring failed' })),
-      decision: 'maybe',
-      summary: 'AI analysis failed; manual review required.'
-    };
+    return { score: 0, strengths: '', weaknesses: '', decision: 'Maybe', summary: 'AI analysis failed; manual review required.' };
   }
 }
 
-async function finalizeAndNotify(job, sess) {
-  const analysis = await analyzeCandidate(job, sess);
-  sess.analysis = analysis;
-  sess.completedAt = new Date().toISOString();
+async function finalizeAndNotify(job, sessionDoc) {
+  const analysis = await analyzeCandidate(job, sessionDoc.answers || []);
 
-  // Notify HR via webhook if configured
-  if (job.hrWebhook) {
+  // Persist submission
+  let submission = null;
+  if (dbReady) {
+    submission = await Submission.create({
+      applicantPhone: sessionDoc.from || sessionDoc.applicantPhone,
+      jobId: job.jobId || job.id,
+      answers: sessionDoc.answers.map(a => ({ question: a.question, answer: a.answer })),
+      aiScore: Number(analysis.score || 0),
+      aiStrengths: String(analysis.strengths || ''),
+      aiWeaknesses: String(analysis.weaknesses || ''),
+      aiDecision: String(analysis.decision || 'Maybe'),
+      aiSummary: String(analysis.summary || ''),
+    });
+  }
+
+  // Notify HR recipients via WhatsApp
+  const recipients = Array.isArray(job.recipients) ? job.recipients : [];
+  const summaryText = `Applicant: ${sessionDoc.from || sessionDoc.applicantPhone}\nJob: ${job.title} (${job.jobId || job.id})\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`;
+  for (const r of recipients) {
     try {
-      await axios.post(job.hrWebhook, {
-        sessionId: sess.id,
-        jobId: job.id,
-        candidate: { phone: sess.from },
-        transcript: transcriptFromSession(sess),
-        analysis
-      }, { timeout: 5000 });
+      await sendWhatsApp(`whatsapp:${r.replace(/^\+/, '+')}`, summaryText);
     } catch (e) {
-      console.warn('HR webhook post failed:', e.message);
+      console.warn('Failed to notify recipient', r, e.message);
     }
   }
 
-  const summaryLines = [
-    `Overall score: ${analysis.overall_score_percent}%`,
-    `Decision: ${analysis.decision}`,
-    `Top strengths: ${analysis.strengths?.slice(0,3).join('; ') || '—'}`,
-    `Top weaknesses: ${analysis.weaknesses?.slice(0,3).join('; ') || '—'}`
-  ];
-  return summaryLines.join('\n');
+  return { analysis, submission };
 }
 
 // Webhook: Twilio inbound WhatsApp
 app.post('/webhook', async (req, res) => {
-  // Twilio sends x-www-form-urlencoded by default
   const message = (req.body.Body || '').trim();
-  const from = (req.body.From || '').trim(); // e.g., whatsapp:+20123456789
+  const fromWa = (req.body.From || '').trim(); // e.g., whatsapp:+20123456789
   const messageSid = req.body.MessageSid;
 
-  if (!from) {
+  if (!fromWa) {
     res.status(400).send('Missing From');
     return;
   }
+  const from = normalizePhone(fromWa);
 
-  const { job, needJobCode } = getOrAskForJob({ message });
+  // Resolve job: latest created, or fallback
+  let job = null;
+  if (dbReady) {
+    job = await Job.findOne({}).sort({ createdAt: -1 }).lean();
+  }
+  if (!job) {
+    const [single] = fallbackJobs.values();
+    if (!single) {
+      await sendWhatsApp(fromWa, 'No active job configured.');
+      return res.send('OK');
+    }
+    job = single;
+  }
 
-  if (needJobCode) {
-    // Ask for job code
-    await sendWhatsApp(from, 'Please reply with the job code (e.g., JOB-123).');
+  // Session
+  let sessionDoc = dbReady ? await Session.findOne({ applicantPhone: from, jobId: job.jobId, completedAt: null }) : null;
+
+  // Start phrase recognition (Arabic "ابدأ عزّام" or English 'start')
+  const normalizedMsg = message.normalize('NFKC').toLowerCase();
+  const isStart = /ابد|ابدا|ابدأ|start/.test(normalizedMsg);
+
+  if (!sessionDoc) {
+    if (!isStart) {
+      await sendWhatsApp(fromWa, `للبدء اكتب: ابدأ عزّام\nTo start, type: start`);
+      return res.send('OK');
+    }
+    if (dbReady) {
+      sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [] });
+    }
+    // Intro + first question
+    await sendWhatsApp(fromWa, `مرحبا! Welcome to ${job.title} assessment. I will ask ${job.questions.length} questions.`);
+    await sendWhatsApp(fromWa, `Q1/${job.questions.length}: ${job.questions[0]}`);
     return res.send('OK');
   }
 
-  // Find or create session
-  let sess = sessions.get(candidateKey(from, job.id));
-  if (!sess) {
-    // Create new session and send intro + first question
-    sess = newSession({ from, jobId: job.id });
-    await sendWhatsApp(from, job.introMessage || `Welcome to ${job.title} screening.`);
-    const q = job.questions[sess.currentIndex];
-    await sendWhatsApp(from, `Q${sess.currentIndex + 1}/${job.questions.length}: ${q.text}`);
-    return res.send('OK');
+  // Idempotency for DB sessions
+  if (dbReady && messageSid) {
+    if (sessionDoc.processedMessageSids.includes(messageSid)) return res.send('OK');
+    sessionDoc.processedMessageSids.push(messageSid);
   }
 
-  // Idempotency: skip duplicate message sids
-  if (messageSid && sess.processedMessageSids.has(messageSid)) {
-    return res.send('OK');
-  }
-  if (messageSid) sess.processedMessageSids.add(messageSid);
-
-  // Record answer to current question
-  const idx = sess.currentIndex;
+  // Record first answer for current question only
+  const idx = sessionDoc.currentIndex || 0;
   if (idx < job.questions.length) {
-    const question = job.questions[idx];
-    sess.answers.push({ qid: question.id, question: question.text, answer: message, ts: new Date().toISOString() });
-    sess.currentIndex += 1;
+    if ((sessionDoc.answers || []).length === idx) {
+      sessionDoc.answers.push({ question: job.questions[idx], answer: message });
+      sessionDoc.currentIndex = idx + 1;
+      if (dbReady) await sessionDoc.save();
+    }
   }
 
-  // If more questions remain
-  if (sess.currentIndex < job.questions.length) {
-    const nextQ = job.questions[sess.currentIndex];
-    await sendWhatsApp(from, `Q${sess.currentIndex + 1}/${job.questions.length}: ${nextQ.text}`);
+  // Ask next or finalize
+  if (sessionDoc.currentIndex < job.questions.length) {
+    const nextIdx = sessionDoc.currentIndex;
+    await sendWhatsApp(fromWa, `Q${nextIdx + 1}/${job.questions.length}: ${job.questions[nextIdx]}`);
     return res.send('OK');
   }
 
-  // Finished: analyze and send closing message + summary
-  const summary = await finalizeAndNotify(job, sess);
-  if (job.closingMessage) {
-    await sendWhatsApp(from, job.closingMessage);
+  // Finalize
+  if (!sessionDoc.completedAt) {
+    sessionDoc.completedAt = new Date();
+    if (dbReady) await sessionDoc.save();
+    const { analysis } = await finalizeAndNotify(job, sessionDoc);
+    await sendWhatsApp(fromWa, `شكرا! Thank you.\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`);
   }
-  await sendWhatsApp(from, `Summary\n${summary}`);
   return res.send('OK');
 });
 
-// HR: create/update a job
-// POST /jobs  { id, title, introMessage?, closingMessage?, hrWebhook?, questions: [{id,text,weight?}] }
-app.post('/jobs', (req, res) => {
-  const { id, title, introMessage, closingMessage, hrWebhook, questions } = req.body || {};
-  if (!id || !title || !Array.isArray(questions) || questions.length === 0) {
-    return res.status(400).json({ error: 'id, title, and questions[] are required' });
+// HR API: create job
+app.post('/api/jobs', async (req, res) => {
+  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
+  if (!title || !Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ error: 'title and questions[] are required' });
   }
-  const norm = {
-    id: String(id).toUpperCase(),
+  const doc = {
+    jobId: generateJobId(),
     title,
-    introMessage: introMessage || '',
-    closingMessage: closingMessage || '',
-    hrWebhook: hrWebhook || '',
-    questions: questions.map((q, i) => ({ id: q.id || `q${i+1}`, text: q.text, weight: q.weight || 1 }))
+    description: description || '',
+    responsibilities: responsibilities || '',
+    requirements: requirements || '',
+    skills: skills || '',
+    benefits: benefits || '',
+    questions: questions.map(String),
+    recipients: Array.isArray(recipients) ? recipients.map(String) : [],
   };
-  jobs.set(norm.id, norm);
-  res.json({ ok: true, job: norm });
-});
-
-// HR: get a job
-app.get('/jobs/:id', (req, res) => {
-  const id = String(req.params.id).toUpperCase();
-  if (!jobs.has(id)) return res.status(404).json({ error: 'Not found' });
-  res.json(jobs.get(id));
-});
-
-// HR: get a session
-app.get('/sessions/:sid', (req, res) => {
-  const sid = req.params.sid;
-  for (const sess of sessions.values()) {
-    if (sess.id === sid) {
-      return res.json({
-        id: sess.id,
-        jobId: sess.jobId,
-        from: sess.from,
-        startedAt: sess.startedAt,
-        completedAt: sess.completedAt,
-        answers: sess.answers,
-        analysis: sess.analysis
-      });
-    }
+  if (dbReady) {
+    const created = await Job.create(doc);
+    return res.json({ ok: true, job: created });
+  } else {
+    fallbackJobs.set(doc.jobId, doc);
+    return res.json({ ok: true, job: doc, warning: 'No DB configured; job stored in-memory only.' });
   }
-  res.status(404).json({ error: 'Not found' });
+});
+
+// HR API: list jobs
+app.get('/api/jobs', async (req, res) => {
+  if (dbReady) {
+    const all = await Job.find({}).sort({ createdAt: -1 }).lean();
+    return res.json(all);
+  }
+  res.json([...fallbackJobs.values()]);
+});
+
+// HR API: get job
+app.get('/api/jobs/:jobId', async (req, res) => {
+  const jobId = req.params.jobId;
+  if (dbReady) {
+    const job = await Job.findOne({ jobId }).lean();
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    return res.json(job);
+  }
+  const job = fallbackJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Not found' });
+  res.json(job);
+});
+
+// HR API: job submissions
+app.get('/api/jobs/:jobId/submissions', async (req, res) => {
+  const jobId = req.params.jobId;
+  if (!dbReady) return res.json([]);
+  const subs = await Submission.find({ jobId }).sort({ createdAt: -1 }).lean();
+  res.json(subs);
+});
+
+// HR API: submission by id
+app.get('/api/submissions/:id', async (req, res) => {
+  if (!dbReady) return res.status(404).json({ error: 'Not found' });
+  const sub = await Submission.findById(req.params.id).lean();
+  if (!sub) return res.status(404).json({ error: 'Not found' });
+  res.json(sub);
 });
 
 // Health
 app.get('/health', (_, res) => res.json({ ok: true }));
+
+// Serve lightweight React Admin (via CDN)
+const path = require('path');
+app.use(express.static('public'));
+app.get(['/','/admin'], (_, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
