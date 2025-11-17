@@ -49,7 +49,6 @@ const JobSchema = new mongoose.Schema(
     benefits: String,
     questions: [String],
     candidateRecipients: [String],
-    hrRecipients: [String],
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );
@@ -106,7 +105,6 @@ const fallbackJobs = new Map();
         'What are your salary expectations and notice period?'
       ],
       candidateRecipients: [],
-      hrRecipients: [],
       createdAt: new Date().toISOString(),
     });
   }
@@ -195,19 +193,6 @@ async function finalizeAndNotify(job, sessionDoc) {
     });
   }
 
-  // Notify HR recipients via WhatsApp (NOT candidates)
-  const hrList = Array.isArray(job.hrRecipients) ? job.hrRecipients : [];
-  const hrText = `Applicant: ${sessionDoc.from || sessionDoc.applicantPhone}\nJob: ${job.title} (${job.jobId || job.id})\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`;
-  for (const r of hrList) {
-    const to = toWhatsApp(r);
-    if (!to) continue;
-    try {
-      await sendWhatsApp(to, hrText);
-    } catch (e) {
-      console.warn('Failed to notify HR recipient', r, e.message);
-    }
-  }
-
   return { analysis, submission };
 }
 
@@ -293,7 +278,7 @@ app.post('/webhook', async (req, res) => {
 
 // HR API: create job
 app.post('/api/jobs', async (req, res) => {
-  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients } = req.body || {};
+  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
   if (!title || !Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'title and questions[] are required' });
   }
@@ -307,7 +292,6 @@ app.post('/api/jobs', async (req, res) => {
     benefits: benefits || '',
     questions: questions.map(String),
     candidateRecipients: Array.isArray(recipients) ? recipients.map(String) : [],
-    hrRecipients: Array.isArray(hrRecipients) ? hrRecipients.map(String) : [],
   };
   if (dbReady) {
     const created = await Job.create(doc);
@@ -356,7 +340,7 @@ app.get('/api/jobs/:jobId', async (req, res) => {
 // HR API: update job (send welcome only to newly added candidate numbers)
 app.put('/api/jobs/:jobId', async (req, res) => {
   const jobId = req.params.jobId;
-  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients } = req.body || {};
+  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
   if (dbReady) {
     const job = await Job.findOne({ jobId });
     if (!job) return res.status(404).json({ error: 'Not found' });
@@ -374,7 +358,6 @@ app.put('/api/jobs/:jobId', async (req, res) => {
     if (benefits != null) job.benefits = benefits;
     if (Array.isArray(questions)) job.questions = questions.map(String);
     job.candidateRecipients = newList;
-    if (Array.isArray(hrRecipients)) job.hrRecipients = hrRecipients.map(String);
     await job.save();
     // Send welcome only to new recipients
     const msg = buildWelcomeMessage(job);
@@ -399,7 +382,6 @@ app.put('/api/jobs/:jobId', async (req, res) => {
     if (benefits != null) job.benefits = benefits;
     if (Array.isArray(questions)) job.questions = questions.map(String);
     job.candidateRecipients = newList;
-    if (Array.isArray(hrRecipients)) job.hrRecipients = hrRecipients.map(String);
     fallbackJobs.set(jobId, job);
     const msg = buildWelcomeMessage(job);
     for (const r of newOnly) {

@@ -19,7 +19,7 @@ Quick Start
   - Open http://localhost:3000/admin
   - Jobs List page: shows all jobs; click a job to open details
   - Job Details page has two tabs:
-    - Job Details: edit job info, questions, candidate recipients, HR recipients; Save updates MongoDB
+    - Job Details: edit job info, questions, candidate recipients; Save updates MongoDB
       - When creating a job, all candidate recipients receive the welcome message automatically
       - When adding new candidate numbers later, only new numbers receive the welcome message
     - Submissions: read-only list of applicant submissions with AI results
@@ -36,7 +36,6 @@ Data Model
   - jobId, title, description, responsibilities, requirements, skills, benefits
   - questions: [String]
   - candidateRecipients: [String] (candidates to receive welcome/start prompt)
-  - hrRecipients: [String] (HR numbers that receive AI evaluation)
   - createdAt
 
 - Submission (MongoDB collection `submissions`)
@@ -48,7 +47,7 @@ AI Evaluation
 - Uses Groq’s OpenAI-compatible Chat Completions API: `https://api.groq.com/openai/v1/chat/completions`
 - Default model: `llama-3.1-8b-instant` (override with env `GROQ_MODEL`)
 - Prompt returns strict JSON with: score, strengths, weaknesses, decision, summary
-- Candidates receive only a final thank-you message; AI evaluation goes to HR recipients
+- Candidates receive only a final thank-you message; AI evaluation appears only in the dashboard (never sent on WhatsApp)
 
 Railway Deployment (Backend)
 

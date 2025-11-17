@@ -75,12 +75,11 @@
         const [benefits, setBenefits] = useState('');
         const [questions, setQuestions] = useState(['']);
         const [recipients, setRecipients] = useState(['']);
-        const [hrRecipients, setHrRecipients] = useState(['']);
         const [busy, setBusy] = useState(false);
         const submit = async () => {
           if (!title || questions.filter(Boolean).length === 0) { alert('Title and at least one question required'); return; }
           setBusy(true);
-          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients }) });
+          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients }) });
           setBusy(false);
           if (!res.ok) return alert('Failed to create job');
           const data = await res.json();
@@ -96,7 +95,6 @@
           TextArea({label:'Benefits', value:benefits, set:setBenefits}),
           DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
           DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
-          DynamicList({label:'HR Recipients (+E164)', items:hrRecipients, setItems:setHrRecipients, placeholder:'+9665...'}),
           e('div', { key:'actions', style:{marginTop:8} }, [
             e('button', { onClick:submit, disabled:busy }, busy?'Creating...':'Create Job'),
             e('button', { className:'secondary', onClick:onCancel, style:{marginLeft:8}}, 'Cancel')
@@ -133,11 +131,10 @@
         const [benefits, setBenefits] = useState(job.benefits||'');
         const [questions, setQuestions] = useState(job.questions||['']);
         const [recipients, setRecipients] = useState(job.candidateRecipients||['']);
-        const [hrRecipients, setHrRecipients] = useState(job.hrRecipients||['']);
         const [busy, setBusy] = useState(false);
         const save = async () => {
           setBusy(true);
-          const res = await fetch(`/api/jobs/${job.jobId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients }) });
+          const res = await fetch(`/api/jobs/${job.jobId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients }) });
           setBusy(false);
           if (!res.ok) return alert('Failed to save');
           const data = await res.json();
@@ -152,7 +149,6 @@
           TextArea({label:'Benefits', value:benefits, set:setBenefits}),
           DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
           DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
-          DynamicList({label:'HR Recipients (+E164)', items:hrRecipients, setItems:setHrRecipients, placeholder:'+9665...'}),
           e('div', { style:{marginTop:8} }, e('button', { onClick:save, disabled:busy }, busy?'Saving...':'Save'))
         ]);
       }
