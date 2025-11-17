@@ -37,8 +37,17 @@
       .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px; grid-auto-flow:row dense}
       .card{background:var(--surface); border:1px solid var(--stroke); border-radius:16px; padding:18px; box-shadow:0 10px 28px rgba(0,0,0,.25), 0 6px 16px rgba(34,197,94,.06)}
       .card:hover{border-color:#246b52}
-      /* Equal-height job cards */
-      .job-card{min-height:140px; display:flex; flex-direction:column; justify-content:space-between; height:100%}
+      /* Equal-height job cards (more compact) */
+      .job-card{min-height:110px; display:flex; flex-direction:column; justify-content:space-between; height:100%; padding:14px 18px}
+
+      /* Skeleton loading */
+      @keyframes shimmer{0%{transform:translateX(-150%)}100%{transform:translateX(150%)}}
+      .skeleton{position:relative; overflow:hidden}
+      .skeleton::after{content:""; position:absolute; top:0; left:0; height:100%; width:100%; background:linear-gradient(90deg, transparent, rgba(255,255,255,.05), transparent); animation:shimmer 1.1s infinite}
+      .skeleton-line{height:12px; background:rgba(255,255,255,.06); border-radius:8px}
+      .skeleton-line.sm{height:10px; width:40%; margin-top:6px}
+      .skeleton-line.md{height:12px; width:65%; margin-top:10px}
+      .skeleton-line.lg{height:16px; width:85%; margin-top:8px}
       .muted{color:var(--muted)}
       .chips{display:flex; flex-wrap:wrap; gap:6px}
       .chip{background:rgba(255,255,255,.06); border:1px solid var(--stroke); padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted)}
@@ -189,12 +198,32 @@
 
       function JobList({ onSelect, onCreate }) {
         const [jobs, setJobs] = useState([]);
-        const load = async () => { const res = await fetch('/api/jobs'); const data = await res.json(); setJobs(data); };
+        const [loading, setLoading] = useState(true);
+        const load = async () => {
+          try {
+            setLoading(true);
+            const res = await fetch('/api/jobs');
+            const data = await res.json();
+            setJobs(Array.isArray(data) ? data : []);
+          } catch(_) {
+            setJobs([]);
+          } finally {
+            setLoading(false);
+          }
+        };
         useEffect(()=>{ load(); }, []);
         return e('div', {}, [
           e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} },
-            jobs.length ? jobs.map(j => e('div', { key:j.jobId, style:{gridColumn:'span 6'} }, e(JobCard, { job:j, onOpen:onSelect }))) :
-              e('div', { className:'muted' }, 'No jobs yet — create your first role.')
+            loading
+              ? [0,1,2].map(i => e('div', { key:'sk'+i, style:{gridColumn:'span 6'} },
+                  e('div', { className:'card job-card skeleton' }, [
+                    e('div', { className:'skeleton-line lg' }),
+                    e('div', { className:'skeleton-line md' })
+                  ])
+                ))
+              : (jobs.length
+                  ? jobs.map(j => e('div', { key:j.jobId, style:{gridColumn:'span 6'} }, e(JobCard, { job:j, onOpen:onSelect })))
+                  : e('div', { className:'muted' }, 'No jobs yet — create your first role.'))
           )
         ]);
       }
