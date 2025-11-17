@@ -412,6 +412,14 @@ app.get('/api/submissions/:id', async (req, res) => {
 // Health
 app.get('/health', (_, res) => res.json({ ok: true }));
 
+// Public app config for UI branding
+app.get('/__app_config.json', (_, res) => {
+  res.json({
+    brandIcon: process.env.BRAND_ICON_URL || '/brand-icon.png',
+    brandName: process.env.BRAND_NAME || 'Azzam ATS • Admin'
+  });
+});
+
 // Serve lightweight React Admin (via CDN)
 const path = require('path');
 app.use(express.static('public'));

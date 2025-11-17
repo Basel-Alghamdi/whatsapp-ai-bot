@@ -68,8 +68,8 @@
     <header class="header">
       <div class="header-inner">
         <div class="brand">
-          <div class="logo"><img src="/brand-icon.png" alt="Azzam" class="logo-img" onerror="this.style.display='none'" /></div>
-          <div>Azzam ATS • Admin</div>
+          <div class="logo"><img id="brand-icon" src="" alt="Azzam" class="logo-img" onerror="this.style.display='none'" /></div>
+          <div id="brand-name">Azzam ATS • Admin</div>
         </div>
         <nav class="nav">
           <button class="btn ghost" id="nav-jobs">Jobs</button>
@@ -86,6 +86,13 @@
     <script>
       const e = React.createElement;
       const { useState, useEffect } = React;
+      // Load branding
+      fetch('/__app_config.json').then(r=>r.json()).then(cfg=>{
+        const img = document.getElementById('brand-icon');
+        const name = document.getElementById('brand-name');
+        if (img && cfg.brandIcon) img.src = cfg.brandIcon;
+        if (name && cfg.brandName) name.textContent = cfg.brandName;
+      }).catch(()=>{});
 
       function TextArea({label, value, set, rows=4, placeholder=''}) {
         return e('div', {}, [
