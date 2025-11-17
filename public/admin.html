@@ -174,7 +174,6 @@
             e('span', { className:'chip' }, job.jobId)
           ]),
           e('div', { className:'muted', style:{margin:'4px 0 8px'} }, `${(job.questions||[]).length} questions • ${new Date(job.createdAt||Date.now()).toLocaleString()}`),
-          e('div', { className:'chips' }, (job.candidateRecipients||[]).slice(0,3).map((r,i)=> e('span', { className:'chip', key:i }, r))),
         ]);
       }
 
