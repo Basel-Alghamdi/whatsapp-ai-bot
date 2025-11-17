@@ -234,26 +234,28 @@
         useEffect(()=>{ load(); }, [job.jobId]);
         return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} },
           (subs||[]).map(s => e('div', { key:s._id, style:{gridColumn:'span 12'} }, e('div', { className:'card' }, [
-            e('div', { className:'inline-actions' }, [
-              e('div', { className:'title', style:{marginRight:'auto'} }, `+ ${s.applicantPhone}`),
-              e('span', { className:'chip success' }, `Score ${s.aiScore}`),
-              e('span', { className:'chip' }, s.aiDecision)
-            ]),
-            e('div', { className:'divider' }),
-            e('details', { style:{marginBottom:10} }, [
-              e('summary', { className:'muted' }, `Answers (${(s.answers||[]).length})`),
-              e('div', { className:'rows', style:{marginTop:10} }, (s.answers||[]).map((qa, i) => e('div', { className:'item', key:i, style:{cursor:'default'} }, [
-                e('div', { className:'muted' }, `Q${i+1}: ${qa.question}`),
-                e('div', {}, qa.answer)
-              ])))
-            ]),
-            e('div', { className:'divider' }),
-            e('div', {}, [
-              e('div', { className:'section-title' }, 'AI Summary'),
-              e('div', { className:'rows' }, [
-                e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, s.aiStrengths || '-')]),
-                e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, s.aiWeaknesses || '-')]),
-                e('div', {}, [e('div', { className:'muted' }, 'Summary'), e('div', {}, s.aiSummary || '-')])
+            e('details', {}, [
+              e('summary', { className:'inline-actions' }, [
+                e('div', { className:'title', style:{marginRight:'auto'} }, `+ ${s.applicantPhone}`),
+                e('span', { className:'chip success' }, `Score ${s.aiScore}`),
+                e('span', { className:'chip' }, s.aiDecision)
+              ]),
+              e('div', { className:'divider' }),
+              e('details', { style:{marginBottom:10} }, [
+                e('summary', { className:'muted' }, `Answers (${(s.answers||[]).length})`),
+                e('div', { className:'rows', style:{marginTop:10} }, (s.answers||[]).map((qa, i) => e('div', { className:'item', key:i, style:{cursor:'default'} }, [
+                  e('div', { className:'muted' }, `Q${i+1}: ${qa.question}`),
+                  e('div', {}, qa.answer)
+                ])))
+              ]),
+              e('div', { className:'divider' }),
+              e('details', {}, [
+                e('summary', { className:'muted' }, 'AI Summary'),
+                e('div', { className:'rows', style:{marginTop:10} }, [
+                  e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, s.aiStrengths || '-')]),
+                  e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, s.aiWeaknesses || '-')]),
+                  e('div', {}, [e('div', { className:'muted' }, 'Summary'), e('div', {}, s.aiSummary || '-')])
+                ])
               ])
             ])
           ])))
