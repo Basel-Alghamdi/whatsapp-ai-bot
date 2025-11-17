@@ -415,7 +415,7 @@ app.get('/health', (_, res) => res.json({ ok: true }));
 // Public app config for UI branding
 app.get('/__app_config.json', (_, res) => {
   res.json({
-    brandIcon: process.env.BRAND_ICON_URL || '/brand-icon.png',
+    brandIcon: process.env.BRAND_ICON_URL || '/images/brand-icon.png',
     brandName: process.env.BRAND_NAME || 'Azzam ATS • Admin'
   });
 });
