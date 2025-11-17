@@ -177,13 +177,13 @@ function isStartMessage(job, message) {
 }
 
 async function converseOnAnswer({ job, sessionDoc, question, message }) {
-  // Uses Groq to decide how to respond and whether to accept the message as the answer
+  // Conversational AI: accepts updates, clarifies, guides; never refuses changes
   const lang = job.language || 'en';
   const sys = {
     role: 'system',
     content: lang === 'ar'
-      ? 'أنت "عزّام" مساعد مقابلات ذكي. تحدث بالعربية فقط. افهم رسالة المرشح بالنسبة للسؤال الحالي. إذا كان يسأل توضيحًا فاشرح السؤال ببساطة. إذا حاول تغيير إجابة سابقة فرفض ذلك بلطف واذكره بأننا نعتمد الإجابة الأولى فقط. إذا كانت الرسالة إجابة مناسبة فاقبلها. أعد JSON فقط بالصيغة: {"action":"answer|clarify|refuse_change|other","assistant_reply":"...","normalized_answer":"..."}. لا تُضِف أي نص خارج JSON.'
-      : 'You are "Azzam", a smart interview assistant. Speak only English. Interpret the candidate message with respect to the current question. If they ask for clarification, explain the question simply. If they try to change a previous answer, politely refuse and remind that only the first answer counts. If the message is a suitable answer, accept it. Return JSON only: {"action":"answer|clarify|refuse_change|other","assistant_reply":"...","normalized_answer":"..."}. Do not add any text outside JSON.'
+      ? 'أنت "عزّام" مساعد مقابلات ذكي، تتحدث العربية فقط. تصرّف كمقابل بشري: إذا طلب المرشح توضيحًا فاشرح السؤال ثم أعد طرحه، إذا كانت الإجابة غير واضحة فاطلب توضيحًا بلطف، وإذا كانت غير مرتبطة فقم بتوجيهه. إذا أراد تغيير إجابته فاقبل التغيير طبيعيًا. أعد JSON فقط بالشكل: {"assistant_reply":"...","normalized_answer": null أو نص، "action":"answer"|"clarify"|"ask_again"|"guide"}. لا تُضِف أي نص خارج JSON.'
+      : 'You are "Azzam", a smart interview assistant. Speak only English. Act like a human interviewer: if the candidate asks for clarification, explain and then re-ask; if the answer is unclear, politely ask for a clearer answer; if unrelated, guide them. If the candidate wants to change an answer, accept the new answer normally. Return JSON only: {"assistant_reply":"...","normalized_answer": null or text, "action":"answer"|"clarify"|"ask_again"|"guide"}. Do not add any text outside JSON.'
   };
   const user = {
     role: 'user',
@@ -202,10 +202,10 @@ async function converseOnAnswer({ job, sessionDoc, question, message }) {
     const raw = resp?.data?.choices?.[0]?.message?.content || '{}';
     let parsed;
     try { parsed = JSON.parse(raw); }
-    catch { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : { action:'other', assistant_reply:'', normalized_answer:'' }; }
+    catch { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : { action:'ask_again', assistant_reply:'', normalized_answer:null }; }
     return parsed;
   } catch (e) {
-    return { action:'other', assistant_reply: '', normalized_answer:'' };
+    return { action:'ask_again', assistant_reply: '', normalized_answer: null };
   }
 }
 
@@ -335,22 +335,25 @@ app.post('/webhook', async (req, res) => {
   if (idx < (job.questions||[]).length) {
     const q = job.questions[idx];
     const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
-    const action = guidance?.action || 'other';
+    const action = guidance?.action || 'ask_again';
     const reply = guidance?.assistant_reply || '';
-    if (action === 'clarify' || action === 'other' || action === 'refuse_change') {
-      if (reply) await sendWhatsApp(fromWa, reply);
-      if (action !== 'refuse_change') {
-        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
-      }
-      return res.send('OK');
-    }
     if (action === 'answer') {
-      if ((sessionDoc.answers || []).length === idx) {
-        const ans = guidance?.normalized_answer || message;
+      const ans = guidance?.normalized_answer ?? message;
+      sessionDoc.answers = sessionDoc.answers || [];
+      if (sessionDoc.answers.length > idx) {
+        sessionDoc.answers[idx] = { question: q, answer: ans };
+      } else if (sessionDoc.answers.length === idx) {
         sessionDoc.answers.push({ question: q, answer: ans });
-        sessionDoc.currentIndex = idx + 1;
-        if (dbReady) await sessionDoc.save();
+      } else {
+        while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+        sessionDoc.answers.push({ question: q, answer: ans });
       }
+      sessionDoc.currentIndex = idx + 1;
+      if (dbReady) await sessionDoc.save();
+    } else {
+      if (reply) await sendWhatsApp(fromWa, reply);
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      return res.send('OK');
     }
   }
 

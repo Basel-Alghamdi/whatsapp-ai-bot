@@ -1,6 +1,6 @@
 {
   "whatsapp": {
-    "welcome": "Hi 👋\nI'm Azzam, the AI assistant.\nYou applied for the job: {{jobTitle}}\nand I need to ask you a few questions.\n\nIf you’re ready, send: start azzam\nNote: Only the first answer for each question is accepted.",
+    "welcome": "Hi 👋\nI'm Azzam, the AI assistant.\nYou applied for the job: {{jobTitle}}\nand I need to ask you a few questions.\n\nIf you’re ready, send: start azzam",
     "final": "Thank you for applying, wishing you all the best 👏",
     "start_hint": "To start, type: start azzam",
     "question_prefix": "Q{{current}}/{{total}}: {{question}}",
@@ -19,4 +19,3 @@
     "saved": "Saved successfully"
   }
 }
-
