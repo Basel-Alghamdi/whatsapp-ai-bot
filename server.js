@@ -539,6 +539,8 @@ app.get('/__app_config.json', (_, res) => {
 
 // Serve lightweight React Admin (via CDN)
 app.use(express.static('public'));
+// Serve locales for Admin UI i18n
+app.use('/locales', express.static('locales'));
 app.get(['/','/admin'], (_, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));
 });

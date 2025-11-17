@@ -24,11 +24,14 @@
       body{margin:0; background:radial-gradient(1000px 800px at 70% -20%, rgba(34,197,94,.14), transparent 60%), var(--bg); color:var(--text); font-family: Inter, Cairo, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
       a{color:inherit}
       .container{max-width:1100px; margin:0 auto; padding:24px}
+      #app-root.rtl{direction:rtl; text-align:right}
+      #app-root.ltr{direction:ltr; text-align:left}
       .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(8px); background:linear-gradient(180deg, rgba(10,24,18,0.96), rgba(10,24,18,0.90)); border-bottom:1px solid var(--stroke);}
       .header-inner{max-width:1100px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between}
       .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px}
       .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 24px rgba(34,197,94,.25); overflow:hidden}
       .nav{display:flex; gap:8px}
+      .lang-toggle{display:flex; gap:6px; align-items:center; margin-left:8px}
       .btn{appearance:none; border:1px solid var(--stroke); background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); color:var(--text); padding:9px 12px; border-radius:10px; cursor:pointer; font-weight:600}
       .btn:hover{border-color:#2a3553}
       .btn.primary{border-color:transparent; background:linear-gradient(135deg, var(--brand), var(--brand-2)); color:white; box-shadow:0 10px 30px rgba(34,211,238,.22)}
@@ -70,6 +73,7 @@
       .danger{color:#fecaca}
       .success{color:#a7f3d0}
       .divider{height:1px; background:var(--stroke); margin:14px 0}
+      .push{margin-inline-start:auto}
     </style>
   </head>
   <body>
@@ -82,10 +86,15 @@
         <nav class="nav">
           <button class="btn ghost" id="nav-jobs">Jobs</button>
           <button class="btn primary" id="nav-create">Create Job</button>
+          <div class="lang-toggle">
+            <button class="btn ghost" id="lang-en">English</button>
+            <span class="muted">|</span>
+            <button class="btn ghost" id="lang-ar">العربية</button>
+          </div>
         </nav>
       </div>
     </header>
-    <div class="container">
+    <div class="container" id="app-root">
       <div id="root"></div>
     </div>
 
@@ -109,6 +118,36 @@
         }
         if (name && cfg.brandName) name.textContent = cfg.brandName;
       }).catch(()=>{});
+
+      // Admin i18n
+      const I18N = { locales:{}, lang:'en' };
+      function getAdminLang(){ return localStorage.getItem('admin_lang') || 'en'; }
+      function applyDir(lang){
+        document.documentElement.dir = (lang==='ar'?'rtl':'ltr');
+        const root = document.getElementById('app-root');
+        if (root){ root.classList.remove('rtl','ltr'); root.classList.add(lang==='ar'?'rtl':'ltr'); }
+      }
+      function t(key){
+        const parts = key.split('.');
+        const lang = I18N.lang || 'en';
+        let cur = I18N.locales[lang] || {};
+        for (const p of parts) cur = (cur||{})[p];
+        if (cur == null){ cur = I18N.locales['en'] || {}; for (const p of parts) cur = (cur||{})[p]; }
+        return cur || key;
+      }
+      async function loadLocales(){
+        const [en, ar] = await Promise.all([
+          fetch('/locales/en.json').then(r=>r.json()),
+          fetch('/locales/ar.json').then(r=>r.json())
+        ]);
+        I18N.locales = { en, ar };
+        I18N.lang = getAdminLang();
+        applyDir(I18N.lang);
+        const btnJobs = document.getElementById('nav-jobs');
+        const btnCreate = document.getElementById('nav-create');
+        if (btnJobs) btnJobs.textContent = t('admin.jobs');
+        if (btnCreate) btnCreate.textContent = t('admin.createJob');
+      }
 
       function TextArea({label, value, set, rows=4, placeholder=''}) {
         return e('div', {}, [
@@ -201,7 +240,7 @@
           ]),
           e('div', { className:'inline-actions', style:{margin:'4px 0 8px'} }, [
             e('span', { className:'chip' }, (job.language||'en').toUpperCase()),
-            e('span', { className:'muted', style:{marginLeft:'auto'} }, `${(job.questions||[]).length} questions • ${(job.candidateRecipients||[]).length} candidates`)
+            e('span', { className:'muted push' }, `${(job.questions||[]).length} ${t('admin.questions')} • ${(job.candidateRecipients||[]).length} ${t('admin.candidates')}`)
           ]),
         ]);
       }
@@ -256,25 +295,25 @@
           if (!res.ok) return alert('Failed to save');
           const data = await res.json();
           onSaved && onSaved(data.job);
-          alert('Saved successfully');
+          alert(t('admin.saved'));
         };
         return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} }, [
           e('div', { className:'col', style:{gridColumn:'span 6'} }, [
-            TextInput({label:'Job Title', value:title, set:setTitle}),
-            e('div', {}, [ e('label', {}, 'Language'), e('div', { className:'chip', style:{ display:'inline-block', marginTop:6 } }, language.toUpperCase()) ]),
-            TextArea({label:'Description', value:description, set:setDescription, rows:5}),
-            TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities, rows:5}),
-            TextArea({label:'Requirements', value:requirements, set:setRequirements, rows:5}),
+            TextInput({label:t('admin.jobTitle'), value:title, set:setTitle}),
+            e('div', {}, [ e('label', {}, t('admin.language')), e('div', { className:'chip', style:{ display:'inline-block', marginTop:6 } }, language.toUpperCase()) ]),
+            TextArea({label:t('admin.description'), value:description, set:setDescription, rows:5}),
+            TextArea({label:t('admin.responsibilities'), value:responsibilities, set:setResponsibilities, rows:5}),
+            TextArea({label:t('admin.requirements'), value:requirements, set:setRequirements, rows:5}),
           ]),
           e('div', { className:'col', style:{gridColumn:'span 6'} }, [
-            TextArea({label:'Skills', value:skills, set:setSkills, rows:4}),
-            TextArea({label:'Benefits', value:benefits, set:setBenefits, rows:4}),
-            DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
-            DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'})
+            TextArea({label:t('admin.skills'), value:skills, set:setSkills, rows:4}),
+            TextArea({label:t('admin.benefits'), value:benefits, set:setBenefits, rows:4}),
+            DynamicList({label:t('admin.questions'), items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
+            DynamicList({label:t('admin.candidates'), items:recipients, setItems:setRecipients, placeholder:'+9665...'})
           ]),
           e('div', { className:'col', style:{gridColumn:'span 12'} }, [
             e('div', { className:'inline-actions', style:{marginTop:12} }, [
-              e('button', { className:'btn primary', onClick:save, disabled:busy }, busy?'Saving...':'Save')
+              e('button', { className:'btn primary', onClick:save, disabled:busy }, busy?t('admin.loading'):t('admin.save'))
             ])
           ])
         ]);
@@ -294,19 +333,19 @@
               ]),
               e('div', { className:'divider' }),
               e('details', { style:{marginBottom:10} }, [
-                e('summary', { className:'muted' }, `Answers (${(s.answers||[]).length})`),
+                e('summary', { className:'muted' }, `${t('admin.answers')} (${(s.answers||[]).length})`),
                 e('div', { className:'rows', style:{marginTop:10} }, (s.answers||[]).map((qa, i) => e('div', { className:'item', key:i, style:{cursor:'default'} }, [
-                  e('div', { className:'muted' }, `Q${i+1}: ${qa.question}`),
+                  e('div', { className:'muted' }, `${t('admin.q')} ${i+1}: ${qa.question}`),
                   e('div', {}, qa.answer)
                 ])))
               ]),
               e('div', { className:'divider' }),
               e('details', {}, [
-                e('summary', { className:'muted' }, 'AI Summary'),
+                e('summary', { className:'muted' }, t('admin.aiSummary')),
                 e('div', { className:'rows', style:{marginTop:10} }, [
-                  e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, (Array.isArray(s.aiStrengths)? s.aiStrengths.join(' • ') : (s.aiStrengths||'-')) )]),
-                  e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, (Array.isArray(s.aiWeaknesses)? s.aiWeaknesses.join(' • ') : (s.aiWeaknesses||'-')) )]),
-                  e('div', {}, [e('div', { className:'muted' }, 'Summary'), e('div', {}, s.aiSummary || '-')])
+                  e('div', {}, [e('div', { className:'muted' }, t('admin.strengths')), e('div', {}, (Array.isArray(s.aiStrengths)? s.aiStrengths.join(' • ') : (s.aiStrengths||'-')) )]),
+                  e('div', {}, [e('div', { className:'muted' }, t('admin.weaknesses')), e('div', {}, (Array.isArray(s.aiWeaknesses)? s.aiWeaknesses.join(' • ') : (s.aiWeaknesses||'-')) )]),
+                  e('div', {}, [e('div', { className:'muted' }, t('admin.summary')), e('div', {}, s.aiSummary || '-')])
                 ])
               ])
             ])
@@ -319,16 +358,16 @@
         const [cur, setCur] = useState(job);
         return e('div', {}, [
           e('div', { className:'inline-actions', style:{marginBottom:12} }, [
-            e('button', { className:'btn', onClick:onBack }, '← Back'),
-            e('div', { style:{marginLeft:'auto'} })
+            e('button', { className:'btn', onClick:onBack }, '← '+t('admin.back')),
+            e('div', { className:'push' })
           ]),
           e('div', { className:'card' }, [
             e('div', { className:'inline-actions' }, [
               e('div', {}, [ e('h2', { className:'title' }, cur.title), e('div', { className:'sub' }, cur.jobId) ]),
             ]),
             e('div', { className:'tabs' }, [
-              e('div', { className:'tab '+(tab==='details'?'active':''), onClick:()=>setTab('details') }, 'Job Details'),
-              e('div', { className:'tab '+(tab==='subs'?'active':''), onClick:()=>setTab('subs') }, 'Submissions')
+              e('div', { className:'tab '+(tab==='details'?'active':''), onClick:()=>setTab('details') }, t('admin.details')),
+              e('div', { className:'tab '+(tab==='subs'?'active':''), onClick:()=>setTab('subs') }, t('admin.submissions'))
             ]),
             tab==='details' ? e(JobDetailsTab, { job: cur, onSaved: setCur }) : e(JobSubmissionsTab, { job: cur })
           ])
@@ -351,11 +390,11 @@
         };
         return e('div', { style:{position:'fixed', inset:0, background:'rgba(0,0,0,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000} },
           e('div', { className:'card', style:{width:420} }, [
-            e('h3', { className:'title' }, 'Create Job'),
+            e('h3', { className:'title' }, t('admin.createJob')),
             e('div', { className:'rows' }, [
-              TextInput({label:'Job Title', value:title, set:setTitle, placeholder:'e.g., Backend Engineer'}),
+              TextInput({label:t('admin.jobTitle'), value:title, set:setTitle, placeholder:'e.g., Backend Engineer'}),
               e('div', {}, [
-                e('label', {}, 'Job Language'),
+                e('label', {}, t('admin.language')),
                 e('select', { value:language, onChange:(ev)=>setLanguage(ev.target.value), style:{ width:'100%', background:'rgba(255,255,255,.04)', border:'1px solid var(--stroke)', color:'var(--text)', borderRadius:10, padding:10 } }, [
                   e('option', { value:'ar' }, 'العربية (ar)'),
                   e('option', { value:'en' }, 'English (en)')
@@ -363,8 +402,8 @@
               ])
             ]),
             e('div', { className:'inline-actions', style:{marginTop:12} }, [
-              e('button', { className:'btn', onClick:onClose }, 'Cancel'),
-              e('button', { className:'btn primary', onClick:submit, disabled:busy }, busy?'Creating...':'Continue')
+              e('button', { className:'btn', onClick:onClose }, t('admin.cancel')),
+              e('button', { className:'btn primary', onClick:submit, disabled:busy }, busy?t('admin.loading'):t('admin.continue'))
             ])
           ])
         );
@@ -377,8 +416,15 @@
         useEffect(()=>{
           const jobsBtn = document.getElementById('nav-jobs');
           const createBtn = document.getElementById('nav-create');
-          jobsBtn.onclick = ()=> { setPage('list'); setModalOpen(false); };
-          createBtn.onclick = ()=> setModalOpen(true);
+          const enBtn = document.getElementById('lang-en');
+          const arBtn = document.getElementById('lang-ar');
+          if (jobsBtn) jobsBtn.onclick = ()=> { setPage('list'); setModalOpen(false); };
+          if (createBtn) createBtn.onclick = ()=> setModalOpen(true);
+          if (enBtn) enBtn.onclick = ()=> { I18N.lang='en'; localStorage.setItem('admin_lang','en'); applyDir('en'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); setPage(p=>p); };
+          if (arBtn) arBtn.onclick = ()=> { I18N.lang='ar'; localStorage.setItem('admin_lang','ar'); applyDir('ar'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); setPage(p=>p); };
+          // initialize labels
+          if (jobsBtn) jobsBtn.textContent = t('admin.jobs');
+          if (createBtn) createBtn.textContent = t('admin.createJob');
         },[]);
         return e('div', { className:'rows' }, [
           e(CreateJobModal, { open: modalOpen, onClose: ()=>setModalOpen(false), onCreated: (j)=>{ setSelected(j); setModalOpen(false); setPage('details'); } }),
@@ -387,8 +433,11 @@
         ]);
       }
 
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(e(App));
+      (async function init(){
+        await loadLocales();
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(App));
+      })();
     </script>
   </body>
   </html>

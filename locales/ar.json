@@ -18,4 +18,35 @@
     "job_title": "عنوان الوظيفة",
     "saved": "تم الحفظ بنجاح"
   }
+  ,
+  "admin": {
+    "jobs": "الوظائف",
+    "createJob": "إنشاء وظيفة",
+    "details": "تفاصيل الوظيفة",
+    "submissions": "التقديمات",
+    "questions": "أسئلة",
+    "candidates": "مرشحون",
+    "save": "حفظ",
+    "add": "إضافة",
+    "remove": "حذف",
+    "back": "رجوع",
+    "language": "اللغة",
+    "noJobs": "لا توجد وظائف بعد — أنشئ أول وظيفة.",
+    "jobTitle": "عنوان الوظيفة",
+    "description": "الوصف",
+    "responsibilities": "المسؤوليات",
+    "requirements": "المتطلبات",
+    "skills": "المهارات",
+    "benefits": "المزايا",
+    "continue": "متابعة",
+    "cancel": "إلغاء",
+    "loading": "جارٍ التحميل…",
+    "answers": "الإجابات",
+    "aiSummary": "ملخص الذكاء الاصطناعي",
+    "strengths": "نقاط القوة",
+    "weaknesses": "نقاط الضعف",
+    "summary": "الملخص",
+    "q": "س",
+    "saved": "تم الحفظ بنجاح"
+  }
 }

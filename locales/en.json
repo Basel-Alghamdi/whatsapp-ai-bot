@@ -18,4 +18,35 @@
     "job_title": "Job Title",
     "saved": "Saved successfully"
   }
+  ,
+  "admin": {
+    "jobs": "Jobs",
+    "createJob": "Create Job",
+    "details": "Job Details",
+    "submissions": "Submissions",
+    "questions": "questions",
+    "candidates": "candidates",
+    "save": "Save",
+    "add": "Add",
+    "remove": "Remove",
+    "back": "Back",
+    "language": "Language",
+    "noJobs": "No jobs yet — create your first role.",
+    "jobTitle": "Job Title",
+    "description": "Description",
+    "responsibilities": "Responsibilities",
+    "requirements": "Requirements",
+    "skills": "Skills",
+    "benefits": "Benefits",
+    "continue": "Continue",
+    "cancel": "Cancel",
+    "loading": "Loading…",
+    "answers": "Answers",
+    "aiSummary": "AI Summary",
+    "strengths": "Strengths",
+    "weaknesses": "Weaknesses",
+    "summary": "Summary",
+    "q": "Q",
+    "saved": "Saved successfully"
+  }
 }
