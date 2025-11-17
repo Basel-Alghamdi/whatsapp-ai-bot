@@ -47,9 +47,17 @@
     "weaknesses": "Weaknesses",
     "summary": "Summary",
     "q": "Q",
+    "brand": "Azzam Assistant • Admin",
     "saved": "Saved successfully",
     "enterTitle": "Please enter a job title",
     "failedCreate": "Failed to create job",
     "failedSave": "Failed to save"
+  },
+  "submission": {
+    "score": "Score",
+    "review": "Review",
+    "decision_review": "Review",
+    "decision_accept": "Accept",
+    "decision_reject": "Reject"
   }
 }

@@ -20,6 +20,7 @@
   }
   ,
   "admin": {
+    "brand": "مساعد عزّام • المسؤول",
     "jobs": "الوظائف",
     "createJob": "إنشاء وظيفة",
     "details": "تفاصيل الوظيفة",
@@ -51,5 +52,12 @@
     "enterTitle": "يرجى إدخال عنوان الوظيفة",
     "failedCreate": "فشل إنشاء الوظيفة",
     "failedSave": "فشل الحفظ"
+  },
+  "submission": {
+    "score": "الدرجة",
+    "review": "مراجعة",
+    "decision_review": "مراجعة",
+    "decision_accept": "قبول",
+    "decision_reject": "رفض"
   }
 }

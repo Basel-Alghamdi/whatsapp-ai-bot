@@ -74,6 +74,14 @@
       .danger{color:#fecaca}
       .success{color:#a7f3d0}
       .divider{height:1px; background:var(--stroke); margin:14px 0}
+      .rtl .align-start{ justify-content:flex-end !important; text-align:right !important }
+      .rtl .align-end{ justify-content:flex-start !important; text-align:left !important }
+      .back-arrow{ display:inline-block }
+      .rtl .back-arrow{ transform: scaleX(-1) }
+      .phone{ text-align:start }
+      .rtl .phone{ text-align:right !important; justify-content:flex-end !important }
+      .ltr .phone{ text-align:left !important }
+      .badge{ margin-inline-start:0 }
       .push{margin-inline-start:auto}
     </style>
   </head>
@@ -117,7 +125,7 @@
           logo.style.backgroundPosition = 'center, center';
           logo.style.backgroundRepeat = 'no-repeat, no-repeat';
         }
-        if (name && cfg.brandName) name.textContent = cfg.brandName;
+        // brand text will be set from i18n later
       }).catch(()=>{});
 
       // Admin i18n
@@ -152,6 +160,8 @@
         const arBtn = document.getElementById('lang-ar');
         if (enBtn) enBtn.classList.toggle('active', I18N.lang==='en');
         if (arBtn) arBtn.classList.toggle('active', I18N.lang==='ar');
+        const brand = document.getElementById('brand-name');
+        if (brand) brand.textContent = t('admin.brand');
       }
 
       function TextArea({label, value, set, rows=4, placeholder=''}) {
@@ -240,8 +250,8 @@
       function JobCard({ job, onOpen }){
         return e('div', { className:'card job-card', onClick:()=>onOpen(job), style:{cursor:'pointer'} }, [
           e('div', { className:'inline-actions' }, [
-            e('h3', { className:'title', style:{marginRight:'auto'} }, job.title),
-            e('span', { className:'chip' }, job.jobId)
+            e('h3', { className:'title', style:{marginInlineEnd:'auto', textAlign:'start'} }, job.title),
+            e('span', { className:'chip badge' }, job.jobId)
           ]),
           e('div', { className:'inline-actions', style:{margin:'4px 0 8px'} }, [
             e('span', { className:'chip' }, (job.language||'en').toUpperCase()),
@@ -332,9 +342,9 @@
           (subs||[]).map(s => e('div', { key:s._id, style:{gridColumn:'span 12'} }, e('div', { className:'card' }, [
             e('details', {}, [
               e('summary', { className:'inline-actions' }, [
-                e('div', { className:'title', style:{marginRight:'auto'} }, `+ ${s.applicantPhone}`),
-                e('span', { className:'chip success' }, `Score ${s.aiScore}`),
-                e('span', { className:'chip' }, s.aiDecision)
+                e('div', { className:'title phone', style:{marginInlineEnd:'auto'} }, `+ ${s.applicantPhone}`),
+                e('span', { className:'chip success' }, `${t('submission.score')} ${s.aiScore}`),
+                e('span', { className:'chip' }, t('submission.decision_'+(s.aiDecision||'review')))
               ]),
               e('div', { className:'divider' }),
               e('details', { style:{marginBottom:10} }, [
@@ -363,7 +373,7 @@
         const [cur, setCur] = useState(job);
         return e('div', {}, [
           e('div', { className:'inline-actions', style:{marginBottom:12} }, [
-            e('button', { className:'btn', onClick:onBack }, '← '+t('admin.back')),
+            e('button', { className:'btn', onClick:onBack }, e('span', { className:'back-arrow' }, '←') +' '+t('admin.back')),
             e('div', { className:'push' })
           ]),
           e('div', { className:'card' }, [
