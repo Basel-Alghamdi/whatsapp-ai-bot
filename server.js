@@ -435,7 +435,7 @@ function resolveBrandIcon() {
 app.get('/__app_config.json', (_, res) => {
   res.json({
     brandIcon: resolveBrandIcon(),
-    brandName: process.env.BRAND_NAME || 'Azzam ATS • Admin'
+    brandName: process.env.BRAND_NAME || 'Azzam Assistant • Admin'
   });
 });
 
