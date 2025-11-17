@@ -47,6 +47,9 @@
     "weaknesses": "Weaknesses",
     "summary": "Summary",
     "q": "Q",
-    "saved": "Saved successfully"
+    "saved": "Saved successfully",
+    "enterTitle": "Please enter a job title",
+    "failedCreate": "Failed to create job",
+    "failedSave": "Failed to save"
   }
 }
