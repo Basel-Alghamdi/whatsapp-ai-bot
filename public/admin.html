@@ -373,7 +373,7 @@
         const [cur, setCur] = useState(job);
         return e('div', {}, [
           e('div', { className:'inline-actions', style:{marginBottom:12} }, [
-            e('button', { className:'btn', onClick:onBack }, e('span', { className:'back-arrow' }, '←') +' '+t('admin.back')),
+            e('button', { className:'btn', onClick:onBack }, [ e('span', { className:'back-arrow' }, '←'), ' ', t('admin.back') ]),
             e('div', { className:'push' })
           ]),
           e('div', { className:'card' }, [
@@ -435,8 +435,8 @@
           const arBtn = document.getElementById('lang-ar');
           if (jobsBtn) jobsBtn.onclick = ()=> { setPage('list'); setModalOpen(false); };
           if (createBtn) createBtn.onclick = ()=> setModalOpen(true);
-          if (enBtn) enBtn.onclick = ()=> { I18N.lang='en'; localStorage.setItem('admin_lang','en'); applyDir('en'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); enBtn.classList.add('active'); if (arBtn) arBtn.classList.remove('active'); setPage(p=>p); };
-          if (arBtn) arBtn.onclick = ()=> { I18N.lang='ar'; localStorage.setItem('admin_lang','ar'); applyDir('ar'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); arBtn.classList.add('active'); if (enBtn) enBtn.classList.remove('active'); setPage(p=>p); };
+          if (enBtn) enBtn.onclick = ()=> { I18N.lang='en'; localStorage.setItem('admin_lang','en'); applyDir('en'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); const brand=document.getElementById('brand-name'); if (brand) brand.textContent=t('admin.brand'); enBtn.classList.add('active'); if (arBtn) arBtn.classList.remove('active'); setPage(p=>p); };
+          if (arBtn) arBtn.onclick = ()=> { I18N.lang='ar'; localStorage.setItem('admin_lang','ar'); applyDir('ar'); if (jobsBtn) jobsBtn.textContent=t('admin.jobs'); if (createBtn) createBtn.textContent=t('admin.createJob'); const brand=document.getElementById('brand-name'); if (brand) brand.textContent=t('admin.brand'); arBtn.classList.add('active'); if (enBtn) enBtn.classList.remove('active'); setPage(p=>p); };
           // initialize labels
           if (jobsBtn) jobsBtn.textContent = t('admin.jobs');
           if (createBtn) createBtn.textContent = t('admin.createJob');
