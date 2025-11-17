@@ -17,20 +17,26 @@ Quick Start
 
 - Admin Dashboard
   - Open http://localhost:3000/admin
-  - Create a Job (title, details, dynamic questions, recipients)
-  - After applicants finish, view submissions (answers + AI summary)
+  - Jobs List page: shows all jobs; click a job to open details
+  - Job Details page has two tabs:
+    - Job Details: edit job info, questions, candidate recipients, HR recipients; Save updates MongoDB
+      - When creating a job, all candidate recipients receive the welcome message automatically
+      - When adding new candidate numbers later, only new numbers receive the welcome message
+    - Submissions: read-only list of applicant submissions with AI results
 
 - Twilio Webhook
   - Expose server (e.g., `ngrok http 3000`)
   - In Twilio WhatsApp Sandbox, set WHEN A MESSAGE COMES IN to: `https://<your-host>/webhook`
-  - Applicant sends: "ابدأ عزّام" (or "start") to begin; bot asks questions one by one
+  - The system proactively sends a welcome message to candidate recipients upon job creation (and to newly added numbers on update)
+  - Applicants can also send: "ابدأ عزّام" (or "start") to begin; bot asks questions one by one
 
 Data Model
 
 - Job (MongoDB collection `jobs`)
   - jobId, title, description, responsibilities, requirements, skills, benefits
   - questions: [String]
-  - recipients: [String]
+  - candidateRecipients: [String] (candidates to receive welcome/start prompt)
+  - hrRecipients: [String] (HR numbers that receive AI evaluation)
   - createdAt
 
 - Submission (MongoDB collection `submissions`)
@@ -42,6 +48,7 @@ AI Evaluation
 - Uses Groq’s OpenAI-compatible Chat Completions API: `https://api.groq.com/openai/v1/chat/completions`
 - Default model: `llama-3.1-8b-instant` (override with env `GROQ_MODEL`)
 - Prompt returns strict JSON with: score, strengths, weaknesses, decision, summary
+- Candidates receive only a final thank-you message; AI evaluation goes to HR recipients
 
 Railway Deployment (Backend)
 

@@ -20,8 +20,11 @@
       .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; margin-right: 6px; }
       .qrow, .rrow { display: flex; gap: 6px; margin-bottom: 6px; }
       .qrow input, .rrow input { flex: 1; }
-      .list { max-height: 300px; overflow: auto; border: 1px solid #eee; border-radius: 8px; padding: 8px; }
-      .item { padding: 8px; border-bottom: 1px solid #f2f2f2; }
+      .list { max-height: 400px; overflow: auto; border: 1px solid #eee; border-radius: 8px; padding: 8px; }
+      .item { padding: 10px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
+      .tabs { display: inline-flex; gap: 8px; margin-bottom: 10px; }
+      .tab { padding: 6px 10px; border: 1px solid #ddd; border-radius: 999px; cursor: pointer; }
+      .tab.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
     </style>
   </head>
   <body>
@@ -63,7 +66,7 @@
         ]);
       }
 
-      function CreateJob({ onCreated }) {
+      function CreateJob({ onCreated, onCancel }) {
         const [title, setTitle] = useState('');
         const [description, setDescription] = useState('');
         const [responsibilities, setResponsibilities] = useState('');
@@ -72,11 +75,12 @@
         const [benefits, setBenefits] = useState('');
         const [questions, setQuestions] = useState(['']);
         const [recipients, setRecipients] = useState(['']);
+        const [hrRecipients, setHrRecipients] = useState(['']);
         const [busy, setBusy] = useState(false);
         const submit = async () => {
           if (!title || questions.filter(Boolean).length === 0) { alert('Title and at least one question required'); return; }
           setBusy(true);
-          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients }) });
+          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients }) });
           setBusy(false);
           if (!res.ok) return alert('Failed to create job');
           const data = await res.json();
@@ -91,14 +95,16 @@
           TextArea({label:'Skills', value:skills, set:setSkills}),
           TextArea({label:'Benefits', value:benefits, set:setBenefits}),
           DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
-          DynamicList({label:'Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
+          DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
+          DynamicList({label:'HR Recipients (+E164)', items:hrRecipients, setItems:setHrRecipients, placeholder:'+9665...'}),
           e('div', { key:'actions', style:{marginTop:8} }, [
-            e('button', { onClick:submit, disabled:busy }, busy?'Creating...':'Create Job')
+            e('button', { onClick:submit, disabled:busy }, busy?'Creating...':'Create Job'),
+            e('button', { className:'secondary', onClick:onCancel, style:{marginLeft:8}}, 'Cancel')
           ])
         ]);
       }
 
-      function JobList({ onSelect }) {
+      function JobList({ onSelect, onCreate }) {
         const [jobs, setJobs] = useState([]);
         const load = async () => {
           const res = await fetch('/api/jobs');
@@ -107,16 +113,51 @@
         };
         useEffect(()=>{ load(); }, []);
         return e('div', { className:'box' }, [
-          e('h2', { key:'h' }, 'Jobs'),
-          e('div', { key:'list', className:'list' }, jobs.map(j => e('div', { className:'item', key:j.jobId }, [
-            e('div', { key:'t' }, `${j.title} `),
-            e('div', { key:'i', className:'muted' }, j.jobId),
-            e('div', { key:'b', style:{marginTop:6} }, e('button', { onClick: ()=>onSelect(j) }, 'Open'))
+          e('div', { key:'hdr', style:{display:'flex', justifyContent:'space-between', alignItems:'center'} }, [
+            e('h2', { key:'h' }, 'Jobs'),
+            e('button', { key:'new', onClick:onCreate }, 'Create Job')
+          ]),
+          e('div', { key:'list', className:'list' }, jobs.map(j => e('div', { className:'item', key:j.jobId, onClick: ()=>onSelect(j) }, [
+            e('div', { key:'t' }, j.title),
+            e('div', { key:'s', className:'muted' }, `${(j.questions||[]).length} questions • ${new Date(j.createdAt||Date.now()).toLocaleString()}`)
           ])))
         ]);
       }
 
-      function JobDetail({ job }) {
+      function JobDetailsTab({ job, onSaved }) {
+        const [title, setTitle] = useState(job.title||'');
+        const [description, setDescription] = useState(job.description||'');
+        const [responsibilities, setResponsibilities] = useState(job.responsibilities||'');
+        const [requirements, setRequirements] = useState(job.requirements||'');
+        const [skills, setSkills] = useState(job.skills||'');
+        const [benefits, setBenefits] = useState(job.benefits||'');
+        const [questions, setQuestions] = useState(job.questions||['']);
+        const [recipients, setRecipients] = useState(job.candidateRecipients||['']);
+        const [hrRecipients, setHrRecipients] = useState(job.hrRecipients||['']);
+        const [busy, setBusy] = useState(false);
+        const save = async () => {
+          setBusy(true);
+          const res = await fetch(`/api/jobs/${job.jobId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients }) });
+          setBusy(false);
+          if (!res.ok) return alert('Failed to save');
+          const data = await res.json();
+          onSaved && onSaved(data.job);
+        };
+        return e('div', {}, [
+          TextInput({label:'Job Title', value:title, set:setTitle}),
+          TextArea({label:'Description', value:description, set:setDescription}),
+          TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities}),
+          TextArea({label:'Requirements', value:requirements, set:setRequirements}),
+          TextArea({label:'Skills', value:skills, set:setSkills}),
+          TextArea({label:'Benefits', value:benefits, set:setBenefits}),
+          DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
+          DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
+          DynamicList({label:'HR Recipients (+E164)', items:hrRecipients, setItems:setHrRecipients, placeholder:'+9665...'}),
+          e('div', { style:{marginTop:8} }, e('button', { onClick:save, disabled:busy }, busy?'Saving...':'Save'))
+        ]);
+      }
+
+      function JobSubmissionsTab({ job }) {
         const [subs, setSubs] = useState([]);
         const load = async () => {
           const res = await fetch(`/api/jobs/${job.jobId}/submissions`);
@@ -124,13 +165,8 @@
           setSubs(data);
         };
         useEffect(()=>{ load(); }, [job.jobId]);
-        return e('div', { className:'box' }, [
-          e('h2', { key:'h' }, job.title),
-          e('div', { key:'meta', className:'muted' }, job.jobId),
-          e('div', { key:'qs' }, [ e('strong', {}, 'Questions:'), e('ul', {}, (job.questions||[]).map((q,i)=> e('li', { key:i }, q))) ]),
-          e('div', { key:'rs' }, [ e('strong', {}, 'Recipients:'), e('div', {}, (job.recipients||[]).map((r,i)=> e('span',{className:'pill',key:i}, r))) ]),
-          e('h3', { key:'sh' }, 'Submissions'),
-          e('div', { key:'list', className:'list' }, (subs||[]).map(s => e('div', { className:'item', key:s._id }, [
+        return e('div', {}, [
+          e('div', { className:'list' }, (subs||[]).map(s => e('div', { className:'item', key:s._id }, [
             e('div', {}, `Phone: ${s.applicantPhone}`),
             e('div', {}, `Score: ${s.aiScore} — Decision: ${s.aiDecision}`),
             e('details', {}, [
@@ -149,15 +185,30 @@
         ]);
       }
 
+      function JobDetailsPage({ job, onBack, onRefresh }) {
+        const [tab, setTab] = useState('details');
+        const [cur, setCur] = useState(job);
+        return e('div', { className:'box' }, [
+          e('div', { key:'hdr', style:{display:'flex', justifyContent:'space-between', alignItems:'center'} }, [
+            e('div', {}, [e('h2', {}, job.title), e('div', { className:'muted' }, job.jobId)]),
+            e('button', { className:'secondary', onClick:onBack }, 'Back')
+          ]),
+          e('div', { key:'tabs', className:'tabs' }, [
+            e('div', { className: 'tab ' + (tab==='details'?'active':''), onClick:()=>setTab('details') }, 'Job Details'),
+            e('div', { className: 'tab ' + (tab==='subs'?'active':''), onClick:()=>setTab('subs') }, 'Submissions')
+          ]),
+          tab==='details' ? e(JobDetailsTab, { job: cur, onSaved: (j)=>{ setCur(j); onRefresh && onRefresh(); } }) : e(JobSubmissionsTab, { job: cur })
+        ]);
+      }
+
       function App() {
+        const [page, setPage] = useState('list'); // 'list' | 'create' | 'details'
         const [selected, setSelected] = useState(null);
-        const onCreated = (job) => { setSelected(job); };
         return e('div', {}, [
           e('h1', { key:'h' }, 'WhatsApp ATS Admin'),
-          e('div', { className:'row', key:'r' }, [
-            e('div', { className:'col', key:'c1' }, e(CreateJob, { onCreated })),
-            e('div', { className:'col', key:'c2' }, selected ? e(JobDetail, { job: selected }) : e(JobList, { onSelect: (j)=>setSelected(j) }))
-          ])
+          page==='list' && e(JobList, { onSelect: (j)=>{ setSelected(j); setPage('details'); }, onCreate: ()=>setPage('create') }),
+          page==='create' && e(CreateJob, { onCreated: (j)=>{ setSelected(j); setPage('details'); }, onCancel: ()=>setPage('list') }),
+          page==='details' && selected && e(JobDetailsPage, { job: selected, onBack: ()=>setPage('list') })
         ]);
       }
 
@@ -166,4 +217,3 @@
     </script>
   </body>
   </html>
-

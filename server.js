@@ -48,7 +48,8 @@ const JobSchema = new mongoose.Schema(
     skills: String,
     benefits: String,
     questions: [String],
-    recipients: [String],
+    candidateRecipients: [String],
+    hrRecipients: [String],
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );
@@ -104,7 +105,8 @@ const fallbackJobs = new Map();
         'Describe a challenging backend problem you solved and how.',
         'What are your salary expectations and notice period?'
       ],
-      recipients: [],
+      candidateRecipients: [],
+      hrRecipients: [],
       createdAt: new Date().toISOString(),
     });
   }
@@ -124,6 +126,16 @@ function generateJobId() {
 
 async function sendWhatsApp(to, body) {
   return client.messages.create({ from: twilioFrom, to, body });
+}
+
+function toWhatsApp(number) {
+  const n = String(number || '').trim();
+  if (!n) return null;
+  return n.startsWith('whatsapp:') ? n : `whatsapp:${n.startsWith('+') ? n : '+' + n}`;
+}
+
+function buildWelcomeMessage(job) {
+  return `Hi 👋\nI'm Azzam the AI assistant, you apply for the job ${job.title} and I want to ask you some questions that help the team to know you more.\nIf you are ready then send start to begin.\nNote: Any question must have only one answer, more than one answer will be not accepted`;
 }
 
 // (legacy helpers removed)
@@ -174,7 +186,7 @@ async function finalizeAndNotify(job, sessionDoc) {
     submission = await Submission.create({
       applicantPhone: sessionDoc.from || sessionDoc.applicantPhone,
       jobId: job.jobId || job.id,
-      answers: sessionDoc.answers.map(a => ({ question: a.question, answer: a.answer })),
+      answers: (sessionDoc.answers || []).map(a => ({ question: a.question, answer: a.answer })),
       aiScore: Number(analysis.score || 0),
       aiStrengths: String(analysis.strengths || ''),
       aiWeaknesses: String(analysis.weaknesses || ''),
@@ -183,14 +195,16 @@ async function finalizeAndNotify(job, sessionDoc) {
     });
   }
 
-  // Notify HR recipients via WhatsApp
-  const recipients = Array.isArray(job.recipients) ? job.recipients : [];
-  const summaryText = `Applicant: ${sessionDoc.from || sessionDoc.applicantPhone}\nJob: ${job.title} (${job.jobId || job.id})\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`;
-  for (const r of recipients) {
+  // Notify HR recipients via WhatsApp (NOT candidates)
+  const hrList = Array.isArray(job.hrRecipients) ? job.hrRecipients : [];
+  const hrText = `Applicant: ${sessionDoc.from || sessionDoc.applicantPhone}\nJob: ${job.title} (${job.jobId || job.id})\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`;
+  for (const r of hrList) {
+    const to = toWhatsApp(r);
+    if (!to) continue;
     try {
-      await sendWhatsApp(`whatsapp:${r.replace(/^\+/, '+')}`, summaryText);
+      await sendWhatsApp(to, hrText);
     } catch (e) {
-      console.warn('Failed to notify recipient', r, e.message);
+      console.warn('Failed to notify HR recipient', r, e.message);
     }
   }
 
@@ -271,15 +285,15 @@ app.post('/webhook', async (req, res) => {
   if (!sessionDoc.completedAt) {
     sessionDoc.completedAt = new Date();
     if (dbReady) await sessionDoc.save();
-    const { analysis } = await finalizeAndNotify(job, sessionDoc);
-    await sendWhatsApp(fromWa, `شكرا! Thank you.\nScore: ${analysis.score}\nDecision: ${analysis.decision}\nSummary: ${analysis.summary || ''}`);
+    await finalizeAndNotify(job, sessionDoc);
+    await sendWhatsApp(fromWa, 'Thank you for applying, wishing you all the best 👏');
   }
   return res.send('OK');
 });
 
 // HR API: create job
 app.post('/api/jobs', async (req, res) => {
-  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
+  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients } = req.body || {};
   if (!title || !Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'title and questions[] are required' });
   }
@@ -292,13 +306,27 @@ app.post('/api/jobs', async (req, res) => {
     skills: skills || '',
     benefits: benefits || '',
     questions: questions.map(String),
-    recipients: Array.isArray(recipients) ? recipients.map(String) : [],
+    candidateRecipients: Array.isArray(recipients) ? recipients.map(String) : [],
+    hrRecipients: Array.isArray(hrRecipients) ? hrRecipients.map(String) : [],
   };
   if (dbReady) {
     const created = await Job.create(doc);
+    // Send welcome to all candidate recipients immediately
+    const msg = buildWelcomeMessage(created);
+    for (const r of created.candidateRecipients || []) {
+      const to = toWhatsApp(r);
+      if (!to) continue;
+      try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
+    }
     return res.json({ ok: true, job: created });
   } else {
     fallbackJobs.set(doc.jobId, doc);
+    const msg = buildWelcomeMessage(doc);
+    for (const r of doc.candidateRecipients || []) {
+      const to = toWhatsApp(r);
+      if (!to) continue;
+      try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
+    }
     return res.json({ ok: true, job: doc, warning: 'No DB configured; job stored in-memory only.' });
   }
 });
@@ -323,6 +351,64 @@ app.get('/api/jobs/:jobId', async (req, res) => {
   const job = fallbackJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Not found' });
   res.json(job);
+});
+
+// HR API: update job (send welcome only to newly added candidate numbers)
+app.put('/api/jobs/:jobId', async (req, res) => {
+  const jobId = req.params.jobId;
+  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients, hrRecipients } = req.body || {};
+  if (dbReady) {
+    const job = await Job.findOne({ jobId });
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    const oldList = Array.isArray(job.candidateRecipients) ? job.candidateRecipients.map(String) : [];
+    const newList = Array.isArray(recipients) ? recipients.map(String) : oldList;
+    // Compute newly added recipients
+    const oldSet = new Set(oldList.map(s => s.trim()));
+    const newOnly = newList.filter(s => !oldSet.has(String(s).trim()));
+    // Update fields
+    if (title != null) job.title = title;
+    if (description != null) job.description = description;
+    if (responsibilities != null) job.responsibilities = responsibilities;
+    if (requirements != null) job.requirements = requirements;
+    if (skills != null) job.skills = skills;
+    if (benefits != null) job.benefits = benefits;
+    if (Array.isArray(questions)) job.questions = questions.map(String);
+    job.candidateRecipients = newList;
+    if (Array.isArray(hrRecipients)) job.hrRecipients = hrRecipients.map(String);
+    await job.save();
+    // Send welcome only to new recipients
+    const msg = buildWelcomeMessage(job);
+    for (const r of newOnly) {
+      const to = toWhatsApp(r);
+      if (!to) continue;
+      try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
+    }
+    return res.json({ ok: true, job });
+  } else {
+    const job = fallbackJobs.get(jobId);
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    const oldList = Array.isArray(job.candidateRecipients) ? job.candidateRecipients.map(String) : [];
+    const newList = Array.isArray(recipients) ? recipients.map(String) : oldList;
+    const oldSet = new Set(oldList.map(s => s.trim()));
+    const newOnly = newList.filter(s => !oldSet.has(String(s).trim()));
+    if (title != null) job.title = title;
+    if (description != null) job.description = description;
+    if (responsibilities != null) job.responsibilities = responsibilities;
+    if (requirements != null) job.requirements = requirements;
+    if (skills != null) job.skills = skills;
+    if (benefits != null) job.benefits = benefits;
+    if (Array.isArray(questions)) job.questions = questions.map(String);
+    job.candidateRecipients = newList;
+    if (Array.isArray(hrRecipients)) job.hrRecipients = hrRecipients.map(String);
+    fallbackJobs.set(jobId, job);
+    const msg = buildWelcomeMessage(job);
+    for (const r of newOnly) {
+      const to = toWhatsApp(r);
+      if (!to) continue;
+      try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
+    }
+    return res.json({ ok: true, job, warning: 'No DB configured; in-memory update only.' });
+  }
 });
 
 // HR API: job submissions
