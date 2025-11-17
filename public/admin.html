@@ -27,8 +27,7 @@
       .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(8px); background:linear-gradient(180deg, rgba(18,41,32,0.85), rgba(18,41,32,0.65)); border-bottom:1px solid var(--stroke);}
       .header-inner{max-width:1100px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between}
       .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px}
-      .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 24px rgba(34,197,94,.25); overflow:hidden; display:flex; align-items:center; justify-content:center}
-      .logo-img{width:100%; height:100%; object-fit:cover; display:block}
+      .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 24px rgba(34,197,94,.25); overflow:hidden}
       .nav{display:flex; gap:8px}
       .btn{appearance:none; border:1px solid var(--stroke); background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); color:var(--text); padding:9px 12px; border-radius:10px; cursor:pointer; font-weight:600}
       .btn:hover{border-color:#2a3553}
@@ -77,7 +76,7 @@
     <header class="header">
       <div class="header-inner">
         <div class="brand">
-          <div class="logo"><img id="brand-icon" src="/images/brand-icon.png" alt="Azzam" class="logo-img" onerror="this.style.display='none'" /></div>
+          <div class="logo" id="brand-logo"></div>
           <div id="brand-name">Azzam ATS • Admin</div>
         </div>
         <nav class="nav">
@@ -95,11 +94,16 @@
     <script>
       const e = React.createElement;
       const { useState, useEffect } = React;
-      // Load branding
+      // Load branding (sets logo background image; falls back to gradient)
       fetch('/__app_config.json').then(r=>r.json()).then(cfg=>{
-        const img = document.getElementById('brand-icon');
+        const logo = document.getElementById('brand-logo');
         const name = document.getElementById('brand-name');
-        if (img && cfg.brandIcon) img.src = cfg.brandIcon;
+        if (logo && cfg.brandIcon) {
+          logo.style.backgroundImage = `url(${cfg.brandIcon}), linear-gradient(135deg, var(--brand), var(--brand-2))`;
+          logo.style.backgroundSize = 'cover, cover';
+          logo.style.backgroundPosition = 'center, center';
+          logo.style.backgroundRepeat = 'no-repeat, no-repeat';
+        }
         if (name && cfg.brandName) name.textContent = cfg.brandName;
       }).catch(()=>{});
 
