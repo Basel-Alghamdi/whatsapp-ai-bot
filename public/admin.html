@@ -3,32 +3,79 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WhatsApp ATS Admin</title>
-    <link rel="preconnect" href="https://unpkg.com" />
+    <title>Azzam ATS • Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
-      h1,h2 { margin: 0 0 12px; }
-      .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
-      label { display: block; margin: 8px 0 4px; font-weight: 600; }
-      input, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
-      button { padding: 8px 12px; border: none; background: #0d6efd; color: #fff; border-radius: 6px; cursor: pointer; }
-      button.secondary { background: #6c757d; }
-      .row { display: flex; gap: 12px; }
-      .col { flex: 1; }
-      ul { padding-left: 18px; }
-      .muted { color: #666; font-size: 12px; }
-      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; margin-right: 6px; }
-      .qrow, .rrow { display: flex; gap: 6px; margin-bottom: 6px; }
-      .qrow input, .rrow input { flex: 1; }
-      .list { max-height: 400px; overflow: auto; border: 1px solid #eee; border-radius: 8px; padding: 8px; }
-      .item { padding: 10px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
-      .tabs { display: inline-flex; gap: 8px; margin-bottom: 10px; }
-      .tab { padding: 6px 10px; border: 1px solid #ddd; border-radius: 999px; cursor: pointer; }
-      .tab.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+      :root{
+        --bg:#0b1020;         /* page background */
+        --surface:#0f172a;    /* cards/nav */
+        --muted:#93a2b7;      /* secondary text */
+        --text:#e6eef9;       /* primary text */
+        --brand:#3b82f6;      /* primary brand */
+        --brand-2:#22d3ee;    /* gradient accent */
+        --stroke:#1f2a44;     /* borders */
+        --ok:#10b981;         /* success */
+        --warn:#f59e0b;       /* warning */
+        --err:#ef4444;        /* error */
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0; background:radial-gradient(1200px 1200px at 80% -10%, rgba(59,130,246,.18), transparent 60%), var(--bg); color:var(--text); font-family: Inter, Cairo, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
+      a{color:inherit}
+      .container{max-width:1100px; margin:0 auto; padding:24px}
+      .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(8px); background:linear-gradient(180deg, rgba(11,16,32,0.85), rgba(11,16,32,0.65)); border-bottom:1px solid var(--stroke);}
+      .header-inner{max-width:1100px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between}
+      .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px}
+      .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 24px rgba(34,211,238,.25)}
+      .nav{display:flex; gap:8px}
+      .btn{appearance:none; border:1px solid var(--stroke); background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); color:var(--text); padding:9px 12px; border-radius:10px; cursor:pointer; font-weight:600}
+      .btn:hover{border-color:#2a3553}
+      .btn.primary{border-color:transparent; background:linear-gradient(135deg, var(--brand), var(--brand-2)); color:white; box-shadow:0 10px 30px rgba(34,211,238,.22)}
+      .btn.ghost{background:transparent}
+      .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px}
+      .card{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); border:1px solid var(--stroke); border-radius:16px; padding:18px}
+      .card:hover{border-color:#2a3553}
+      .muted{color:var(--muted)}
+      .chips{display:flex; flex-wrap:wrap; gap:6px}
+      .chip{background:rgba(255,255,255,.06); border:1px solid var(--stroke); padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted)}
+      label{display:block; font-weight:600; margin:10px 0 6px}
+      input, textarea{width:100%; background:rgba(255,255,255,.04); border:1px solid var(--stroke); color:var(--text); border-radius:10px; padding:10px}
+      textarea{resize:vertical}
+      .rows{display:flex; flex-direction:column; gap:12px}
+      .row{display:flex; gap:12px}
+      .col{flex:1}
+      .list{display:flex; flex-direction:column; gap:10px; max-height:520px; overflow:auto}
+      .item{padding:12px; border:1px dashed var(--stroke); border-radius:12px; cursor:pointer}
+      .item:hover{border-color:#2a3553}
+      .tabs{display:flex; gap:8px; margin:12px 0 16px}
+      .tab{padding:8px 12px; border-radius:999px; border:1px solid var(--stroke); cursor:pointer; color:var(--muted)}
+      .tab.active{color:white; border-color:transparent; background:linear-gradient(135deg, var(--brand), var(--brand-2));}
+      .kbd{display:inline-block; border:1px solid var(--stroke); border-bottom-width:2px; padding:0 6px; border-radius:6px; font-size:12px; color:var(--muted)}
+      .section-title{margin:6px 0 12px; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.12em}
+      .title{margin:0 0 6px}
+      .sub{margin:0; color:var(--muted)}
+      .inline-actions{display:flex; gap:8px; align-items:center}
+      .danger{color:#fecaca}
+      .success{color:#a7f3d0}
+      .divider{height:1px; background:var(--stroke); margin:14px 0}
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <header class="header">
+      <div class="header-inner">
+        <div class="brand">
+          <div class="logo"></div>
+          <div>Azzam ATS • Admin</div>
+        </div>
+        <nav class="nav">
+          <button class="btn ghost" id="nav-jobs">Jobs</button>
+          <button class="btn primary" id="nav-create">Create Job</button>
+        </nav>
+      </div>
+    </header>
+    <div class="container">
+      <div id="root"></div>
+    </div>
 
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -36,33 +83,31 @@
       const e = React.createElement;
       const { useState, useEffect } = React;
 
-      function TextArea({label, value, set}) {
+      function TextArea({label, value, set, rows=4, placeholder=''}) {
         return e('div', {}, [
           e('label', { key:'l' }, label),
-          e('textarea', { key:'t', rows:4, value: value||'', onChange:(ev)=>set(ev.target.value) })
+          e('textarea', { key:'t', rows, value: value||'', placeholder, onChange:(ev)=>set(ev.target.value) })
         ]);
       }
 
-      function TextInput({label, value, set}) {
+      function TextInput({label, value, set, placeholder=''}) {
         return e('div', {}, [
           e('label', { key:'l' }, label),
-          e('input', { key:'i', value: value||'', onChange:(ev)=>set(ev.target.value) })
+          e('input', { key:'i', value: value||'', placeholder, onChange:(ev)=>set(ev.target.value) })
         ]);
       }
 
       function DynamicList({label, items, setItems, placeholder}) {
         const add = () => setItems([...(items||[]), '']);
-        const setIdx = (i, v) => {
-          const c = items.slice(); c[i] = v; setItems(c);
-        };
+        const setIdx = (i, v) => { const c = items.slice(); c[i] = v; setItems(c); };
         const del = (i) => { const c = items.slice(); c.splice(i,1); setItems(c); };
         return e('div', {}, [
           e('label', { key:'l' }, label),
-          e('div', { key:'rows' }, (items||[]).map((it, idx)=> e('div', { className:'qrow', key:idx }, [
-            e('input', { value:it, placeholder, onChange:(ev)=>setIdx(idx, ev.target.value) }),
-            e('button', { className:'secondary', onClick:()=>del(idx) }, 'Remove')
+          e('div', { key:'rows', className:'rows' }, (items||[]).map((it, idx)=> e('div', { className:'row', key:idx }, [
+            e('input', { className:'col', value:it, placeholder, onChange:(ev)=>setIdx(idx, ev.target.value) }),
+            e('button', { className:'btn', onClick:()=>del(idx) }, 'Remove')
           ]))),
-          e('button', { key:'b', onClick:add, style:{marginTop:6}}, 'Add')
+          e('button', { key:'b', className:'btn', onClick:add, style:{marginTop:6}}, 'Add')
         ]);
       }
 
@@ -85,40 +130,54 @@
           const data = await res.json();
           onCreated && onCreated(data.job);
         };
-        return e('div', { className:'box' }, [
-          e('h2', { key:'h' }, 'Create Job'),
-          TextInput({label:'Job Title', value:title, set:setTitle}),
-          TextArea({label:'Description', value:description, set:setDescription}),
-          TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities}),
-          TextArea({label:'Requirements', value:requirements, set:setRequirements}),
-          TextArea({label:'Skills', value:skills, set:setSkills}),
-          TextArea({label:'Benefits', value:benefits, set:setBenefits}),
-          DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
-          DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
-          e('div', { key:'actions', style:{marginTop:8} }, [
-            e('button', { onClick:submit, disabled:busy }, busy?'Creating...':'Create Job'),
-            e('button', { className:'secondary', onClick:onCancel, style:{marginLeft:8}}, 'Cancel')
+        return e('div', { className:'card' }, [
+          e('h2', { className:'title', key:'h' }, 'Create Job'),
+          e('p', { className:'sub', key:'p' }, 'Define the role, add questions, and invite candidates.'),
+          e('div', { className:'grid', style:{marginTop:8}, key:'grid' }, [
+            e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+              TextInput({label:'Job Title', value:title, set:setTitle, placeholder:'e.g., Backend Engineer'}),
+              TextArea({label:'Description', value:description, set:setDescription, rows:5, placeholder:'High-level role overview'})
+            ]),
+            e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+              TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities, rows:5}),
+              TextArea({label:'Requirements', value:requirements, set:setRequirements, rows:5})
+            ]),
+            e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+              TextArea({label:'Skills', value:skills, set:setSkills, rows:4}),
+              TextArea({label:'Benefits', value:benefits, set:setBenefits, rows:4})
+            ]),
+            e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+              DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
+              DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'})
+            ])
+          ]),
+          e('div', { className:'inline-actions', style:{marginTop:12} }, [
+            e('button', { className:'btn primary', onClick:submit, disabled:busy }, busy?'Creating...':'Create Job'),
+            e('button', { className:'btn', onClick:onCancel }, 'Cancel')
           ])
+        ]);
+      }
+
+      function JobCard({ job, onOpen }){
+        return e('div', { className:'card', onClick:()=>onOpen(job), style:{cursor:'pointer'} }, [
+          e('div', { className:'inline-actions' }, [
+            e('h3', { className:'title', style:{marginRight:'auto'} }, job.title),
+            e('span', { className:'chip' }, job.jobId)
+          ]),
+          e('div', { className:'muted', style:{margin:'4px 0 8px'} }, `${(job.questions||[]).length} questions • ${new Date(job.createdAt||Date.now()).toLocaleString()}`),
+          e('div', { className:'chips' }, (job.candidateRecipients||[]).slice(0,3).map((r,i)=> e('span', { className:'chip', key:i }, r))),
         ]);
       }
 
       function JobList({ onSelect, onCreate }) {
         const [jobs, setJobs] = useState([]);
-        const load = async () => {
-          const res = await fetch('/api/jobs');
-          const data = await res.json();
-          setJobs(data);
-        };
+        const load = async () => { const res = await fetch('/api/jobs'); const data = await res.json(); setJobs(data); };
         useEffect(()=>{ load(); }, []);
-        return e('div', { className:'box' }, [
-          e('div', { key:'hdr', style:{display:'flex', justifyContent:'space-between', alignItems:'center'} }, [
-            e('h2', { key:'h' }, 'Jobs'),
-            e('button', { key:'new', onClick:onCreate }, 'Create Job')
-          ]),
-          e('div', { key:'list', className:'list' }, jobs.map(j => e('div', { className:'item', key:j.jobId, onClick: ()=>onSelect(j) }, [
-            e('div', { key:'t' }, j.title),
-            e('div', { key:'s', className:'muted' }, `${(j.questions||[]).length} questions • ${new Date(j.createdAt||Date.now()).toLocaleString()}`)
-          ])))
+        return e('div', {}, [
+          e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} },
+            jobs.length ? jobs.map(j => e('div', { key:j.jobId, style:{gridColumn:'span 6'} }, e(JobCard, { job:j, onOpen:onSelect }))) :
+              e('div', { className:'muted' }, 'No jobs yet — create your first role.')
+          )
         ]);
       }
 
@@ -140,68 +199,90 @@
           const data = await res.json();
           onSaved && onSaved(data.job);
         };
-        return e('div', {}, [
-          TextInput({label:'Job Title', value:title, set:setTitle}),
-          TextArea({label:'Description', value:description, set:setDescription}),
-          TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities}),
-          TextArea({label:'Requirements', value:requirements, set:setRequirements}),
-          TextArea({label:'Skills', value:skills, set:setSkills}),
-          TextArea({label:'Benefits', value:benefits, set:setBenefits}),
-          DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
-          DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'}),
-          e('div', { style:{marginTop:8} }, e('button', { onClick:save, disabled:busy }, busy?'Saving...':'Save'))
+        return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} }, [
+          e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+            TextInput({label:'Job Title', value:title, set:setTitle}),
+            TextArea({label:'Description', value:description, set:setDescription, rows:5}),
+            TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities, rows:5}),
+            TextArea({label:'Requirements', value:requirements, set:setRequirements, rows:5}),
+          ]),
+          e('div', { className:'col', style:{gridColumn:'span 6'} }, [
+            TextArea({label:'Skills', value:skills, set:setSkills, rows:4}),
+            TextArea({label:'Benefits', value:benefits, set:setBenefits, rows:4}),
+            DynamicList({label:'Questions', items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
+            DynamicList({label:'Candidate Recipients (+E164)', items:recipients, setItems:setRecipients, placeholder:'+9665...'})
+          ]),
+          e('div', { className:'col', style:{gridColumn:'span 12'} }, [
+            e('div', { className:'inline-actions', style:{marginTop:12} }, [
+              e('button', { className:'btn primary', onClick:save, disabled:busy }, busy?'Saving...':'Save')
+            ])
+          ])
         ]);
       }
 
       function JobSubmissionsTab({ job }) {
         const [subs, setSubs] = useState([]);
-        const load = async () => {
-          const res = await fetch(`/api/jobs/${job.jobId}/submissions`);
-          const data = await res.json();
-          setSubs(data);
-        };
+        const load = async () => { const res = await fetch(`/api/jobs/${job.jobId}/submissions`); const data = await res.json(); setSubs(data); };
         useEffect(()=>{ load(); }, [job.jobId]);
-        return e('div', {}, [
-          e('div', { className:'list' }, (subs||[]).map(s => e('div', { className:'item', key:s._id }, [
-            e('div', {}, `Phone: ${s.applicantPhone}`),
-            e('div', {}, `Score: ${s.aiScore} — Decision: ${s.aiDecision}`),
-            e('details', {}, [
-              e('summary', {}, 'Answers'),
-              e('ul', {}, (s.answers||[]).map((qa,i)=> e('li', { key:i }, `Q: ${qa.question} — A: ${qa.answer}`)))
+        return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} },
+          (subs||[]).map(s => e('div', { key:s._id, style:{gridColumn:'span 12'} }, e('div', { className:'card' }, [
+            e('div', { className:'inline-actions' }, [
+              e('div', { className:'title', style:{marginRight:'auto'} }, `+ ${s.applicantPhone}`),
+              e('span', { className:'chip success' }, `Score ${s.aiScore}`),
+              e('span', { className:'chip' }, s.aiDecision)
             ]),
-            e('details', {}, [
-              e('summary', {}, 'AI Summary'),
-              e('div', {}, [
-                e('div', {}, `Strengths: ${s.aiStrengths}`),
-                e('div', {}, `Weaknesses: ${s.aiWeaknesses}`),
-                e('div', {}, `Summary: ${s.aiSummary}`)
+            e('div', { className:'divider' }),
+            e('div', {}, [
+              e('div', { className:'section-title' }, 'Answers'),
+              e('div', { className:'rows' }, (s.answers||[]).map((qa, i) => e('div', { className:'item', key:i, style:{cursor:'default'} }, [
+                e('div', { className:'muted' }, `Q${i+1}: ${qa.question}`),
+                e('div', {}, qa.answer)
+              ])))
+            ]),
+            e('div', { className:'divider' }),
+            e('div', {}, [
+              e('div', { className:'section-title' }, 'AI Summary'),
+              e('div', { className:'rows' }, [
+                e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, s.aiStrengths || '-')]),
+                e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, s.aiWeaknesses || '-')]),
+                e('div', {}, [e('div', { className:'muted' }, 'Summary'), e('div', {}, s.aiSummary || '-')])
               ])
             ])
           ])))
-        ]);
+        );
       }
 
-      function JobDetailsPage({ job, onBack, onRefresh }) {
+      function JobDetailsPage({ job, onBack }) {
         const [tab, setTab] = useState('details');
         const [cur, setCur] = useState(job);
-        return e('div', { className:'box' }, [
-          e('div', { key:'hdr', style:{display:'flex', justifyContent:'space-between', alignItems:'center'} }, [
-            e('div', {}, [e('h2', {}, job.title), e('div', { className:'muted' }, job.jobId)]),
-            e('button', { className:'secondary', onClick:onBack }, 'Back')
+        return e('div', {}, [
+          e('div', { className:'inline-actions', style:{marginBottom:12} }, [
+            e('button', { className:'btn', onClick:onBack }, '← Back'),
+            e('div', { style:{marginLeft:'auto'} })
           ]),
-          e('div', { key:'tabs', className:'tabs' }, [
-            e('div', { className: 'tab ' + (tab==='details'?'active':''), onClick:()=>setTab('details') }, 'Job Details'),
-            e('div', { className: 'tab ' + (tab==='subs'?'active':''), onClick:()=>setTab('subs') }, 'Submissions')
-          ]),
-          tab==='details' ? e(JobDetailsTab, { job: cur, onSaved: (j)=>{ setCur(j); onRefresh && onRefresh(); } }) : e(JobSubmissionsTab, { job: cur })
+          e('div', { className:'card' }, [
+            e('div', { className:'inline-actions' }, [
+              e('div', {}, [ e('h2', { className:'title' }, cur.title), e('div', { className:'sub' }, cur.jobId) ]),
+            ]),
+            e('div', { className:'tabs' }, [
+              e('div', { className:'tab '+(tab==='details'?'active':''), onClick:()=>setTab('details') }, 'Job Details'),
+              e('div', { className:'tab '+(tab==='subs'?'active':''), onClick:()=>setTab('subs') }, 'Submissions')
+            ]),
+            tab==='details' ? e(JobDetailsTab, { job: cur, onSaved: setCur }) : e(JobSubmissionsTab, { job: cur })
+          ])
         ]);
       }
 
       function App() {
         const [page, setPage] = useState('list'); // 'list' | 'create' | 'details'
         const [selected, setSelected] = useState(null);
-        return e('div', {}, [
-          e('h1', { key:'h' }, 'WhatsApp ATS Admin'),
+        useEffect(()=>{
+          const jobsBtn = document.getElementById('nav-jobs');
+          const createBtn = document.getElementById('nav-create');
+          jobsBtn.onclick = ()=> setPage('list');
+          createBtn.onclick = ()=> setPage('create');
+        },[]);
+        return e('div', { className:'rows' }, [
           page==='list' && e(JobList, { onSelect: (j)=>{ setSelected(j); setPage('details'); }, onCreate: ()=>setPage('create') }),
           page==='create' && e(CreateJob, { onCreated: (j)=>{ setSelected(j); setPage('details'); }, onCancel: ()=>setPage('list') }),
           page==='details' && selected && e(JobDetailsPage, { job: selected, onBack: ()=>setPage('list') })
