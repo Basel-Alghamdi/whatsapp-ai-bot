@@ -3,6 +3,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 
 // Twilio
 const accountSid = process.env.TWILIO_SID;
@@ -413,15 +415,31 @@ app.get('/api/submissions/:id', async (req, res) => {
 app.get('/health', (_, res) => res.json({ ok: true }));
 
 // Public app config for UI branding
+function resolveBrandIcon() {
+  if (process.env.BRAND_ICON_URL) return process.env.BRAND_ICON_URL;
+  try {
+    const imagesDir = path.join(process.cwd(), 'public', 'images');
+    const files = fs.readdirSync(imagesDir).filter(f => !f.startsWith('.') && f !== '.gitkeep');
+    // Prefer brand-icon.* if present
+    const preferred = files.find(f => /^brand-icon\.(png|jpg|jpeg|svg|webp)$/i.test(f));
+    if (preferred) return `/images/${preferred}`;
+    // Else pick the first recognizable image extension
+    const firstImg = files.find(f => /\.(png|jpg|jpeg|svg|webp)$/i.test(f));
+    if (firstImg) return `/images/${firstImg}`;
+  } catch (e) {
+    // ignore
+  }
+  return '/images/brand-icon.png';
+}
+
 app.get('/__app_config.json', (_, res) => {
   res.json({
-    brandIcon: process.env.BRAND_ICON_URL || '/images/brand-icon.png',
+    brandIcon: resolveBrandIcon(),
     brandName: process.env.BRAND_NAME || 'Azzam ATS • Admin'
   });
 });
 
 // Serve lightweight React Admin (via CDN)
-const path = require('path');
 app.use(express.static('public'));
 app.get(['/','/admin'], (_, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));

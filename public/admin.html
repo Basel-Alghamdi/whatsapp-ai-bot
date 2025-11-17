@@ -99,7 +99,10 @@
         const logo = document.getElementById('brand-logo');
         const name = document.getElementById('brand-name');
         if (logo && cfg.brandIcon) {
-          logo.style.backgroundImage = `url(${cfg.brandIcon}), linear-gradient(135deg, var(--brand), var(--brand-2))`;
+          const iconUrl = encodeURI(cfg.brandIcon);
+          logo.style.backgroundImage = `linear-gradient(135deg, var(--brand), var(--brand-2))`;
+          // Put image layer on top
+          logo.style.backgroundImage = `url("${iconUrl}"), ` + logo.style.backgroundImage;
           logo.style.backgroundSize = 'cover, cover';
           logo.style.backgroundPosition = 'center, center';
           logo.style.backgroundRepeat = 'no-repeat, no-repeat';
