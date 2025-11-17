@@ -7,24 +7,24 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
       :root{
-        /* Green-forward Hailaman identity */
-        --bg:#0a1511;         /* page background (deep green/black) */
-        --surface:#0f1c17;    /* cards/nav surfaces */
-        --muted:#9bb7aa;      /* secondary text */
-        --text:#e6f4ed;       /* primary text */
-        --brand:#22c55e;      /* primary brand (emerald 500) */
-        --brand-2:#34d399;    /* gradient accent (emerald 400) */
-        --stroke:#15382c;     /* borders (green-tinted) */
+        /* Green-forward Hailaman identity (slightly lighter) */
+        --bg:#0f241c;         /* page background */
+        --surface:#122920;    /* cards/nav surfaces */
+        --muted:#a3beaf;      /* secondary text */
+        --text:#f0faf5;       /* primary text */
+        --brand:#22c55e;      /* primary brand */
+        --brand-2:#34d399;    /* gradient accent */
+        --stroke:#1c4d3b;     /* borders */
         --ok:#22c55e;         /* success */
         --warn:#f59e0b;       /* warning */
         --err:#ef4444;        /* error */
       }
       *{box-sizing:border-box}
       html,body{height:100%}
-      body{margin:0; background:radial-gradient(1200px 1200px at 80% -10%, rgba(34,197,94,.18), transparent 60%), var(--bg); color:var(--text); font-family: Inter, Cairo, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
+      body{margin:0; background:radial-gradient(1000px 800px at 70% -20%, rgba(34,197,94,.14), transparent 60%), var(--bg); color:var(--text); font-family: Inter, Cairo, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;}
       a{color:inherit}
       .container{max-width:1100px; margin:0 auto; padding:24px}
-      .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(8px); background:linear-gradient(180deg, rgba(11,16,32,0.85), rgba(11,16,32,0.65)); border-bottom:1px solid var(--stroke);}
+      .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(8px); background:linear-gradient(180deg, rgba(18,41,32,0.85), rgba(18,41,32,0.65)); border-bottom:1px solid var(--stroke);}
       .header-inner{max-width:1100px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between}
       .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px}
       .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 24px rgba(34,211,238,.25)}
@@ -34,8 +34,8 @@
       .btn.primary{border-color:transparent; background:linear-gradient(135deg, var(--brand), var(--brand-2)); color:white; box-shadow:0 10px 30px rgba(34,211,238,.22)}
       .btn.ghost{background:transparent}
       .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px; grid-auto-flow:row dense}
-      .card{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); border:1px solid var(--stroke); border-radius:16px; padding:18px}
-      .card:hover{border-color:#2a3553}
+      .card{background:var(--surface); border:1px solid var(--stroke); border-radius:16px; padding:18px; box-shadow:0 10px 28px rgba(0,0,0,.25), 0 6px 16px rgba(34,197,94,.06)}
+      .card:hover{border-color:#246b52}
       .muted{color:var(--muted)}
       .chips{display:flex; flex-wrap:wrap; gap:6px}
       .chip{background:rgba(255,255,255,.06); border:1px solid var(--stroke); padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted)}
