@@ -1,0 +1,22 @@
+{
+  "whatsapp": {
+    "welcome": "Hi 👋\nI'm Azzam, the AI assistant.\nYou applied for the job: {{jobTitle}}\nand I need to ask you a few questions.\n\nIf you’re ready, send: start azzam\nNote: Only the first answer for each question is accepted.",
+    "final": "Thank you for applying, wishing you all the best 👏",
+    "start_hint": "To start, type: start azzam",
+    "question_prefix": "Q{{current}}/{{total}}: {{question}}",
+    "no_questions": "No questions configured yet."
+  },
+  "ui": {
+    "jobs": "Jobs",
+    "create_job": "Create Job",
+    "job_details": "Job Details",
+    "submissions": "Submissions",
+    "save": "Save",
+    "cancel": "Cancel",
+    "continue": "Continue",
+    "job_language": "Job Language",
+    "job_title": "Job Title",
+    "saved": "Saved successfully"
+  }
+}
+

@@ -22,6 +22,29 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
+// Load locales for i18n (server-side only for WhatsApp messages)
+const locales = {};
+function loadLocales(){
+  try {
+    locales.en = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'locales', 'en.json'), 'utf8'));
+  } catch {}
+  try {
+    locales.ar = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'locales', 'ar.json'), 'utf8'));
+  } catch {}
+}
+loadLocales();
+
+function tmpl(str, vars){
+  return String(str||'').replace(/\{\{(.*?)\}\}/g, (_,k)=> (vars && vars[k.trim()]!=null)? String(vars[k.trim()]): '');
+}
+function t(lang, key, vars){
+  const parts = key.split('.');
+  let cur = locales[lang] || locales.en || {};
+  for (const p of parts) cur = (cur||{})[p];
+  const base = cur || '';
+  return tmpl(base, vars);
+}
+
 // MongoDB (optional but recommended)
 const MONGODB_URI = process.env.MONGODB_URI;
 let dbReady = false;
@@ -43,6 +66,7 @@ if (MONGODB_URI) {
 const JobSchema = new mongoose.Schema(
   {
     jobId: { type: String, unique: true, index: true },
+    language: { type: String, enum: ['ar','en'], default: 'en' },
     title: String,
     description: String,
     responsibilities: String,
@@ -74,8 +98,8 @@ const SubmissionSchema = new mongoose.Schema(
     jobId: { type: String, index: true },
     answers: [{ question: String, answer: String }],
     aiScore: { type: Number, default: 0 },
-    aiStrengths: String,
-    aiWeaknesses: String,
+    aiStrengths: [String],
+    aiWeaknesses: [String],
     aiDecision: String,
     aiSummary: String,
     createdAt: { type: Date, default: Date.now },
@@ -94,6 +118,7 @@ const fallbackJobs = new Map();
   if (!fallbackJobs.has(id)) {
     fallbackJobs.set(id, {
       jobId: id,
+      language: 'en',
       title: 'Junior Backend Engineer',
       description: '',
       responsibilities: '',
@@ -135,7 +160,53 @@ function toWhatsApp(number) {
 }
 
 function buildWelcomeMessage(job) {
-  return `Hi 👋\nI'm Azzam the AI assistant, you apply for the job ${job.title} and I want to ask you some questions that help the team to know you more.\nIf you are ready then send start to begin.\nNote: Any question must have only one answer, more than one answer will be not accepted`;
+  const lang = (job.language||'en');
+  return t(lang, 'whatsapp.welcome', { jobTitle: job.title });
+}
+
+function buildFinalMessage(job) {
+  return t((job.language||'en'), 'whatsapp.final');
+}
+
+function isStartMessage(job, message) {
+  const m = (message || '').trim().toLowerCase();
+  if ((job.language || 'en') === 'ar') {
+    return /(ابدأ\s*عزّام|ابدا\s*عزام|ابدا\s*عزّام|ابدأ|ابدا)/.test(m);
+  }
+  return /(start\s*azzam|start)/.test(m);
+}
+
+async function converseOnAnswer({ job, sessionDoc, question, message }) {
+  // Uses Groq to decide how to respond and whether to accept the message as the answer
+  const lang = job.language || 'en';
+  const sys = {
+    role: 'system',
+    content: lang === 'ar'
+      ? 'أنت "عزّام" مساعد مقابلات ذكي. تحدث بالعربية فقط. افهم رسالة المرشح بالنسبة للسؤال الحالي. إذا كان يسأل توضيحًا فاشرح السؤال ببساطة. إذا حاول تغيير إجابة سابقة فرفض ذلك بلطف واذكره بأننا نعتمد الإجابة الأولى فقط. إذا كانت الرسالة إجابة مناسبة فاقبلها. أعد JSON فقط بالصيغة: {"action":"answer|clarify|refuse_change|other","assistant_reply":"...","normalized_answer":"..."}. لا تُضِف أي نص خارج JSON.'
+      : 'You are "Azzam", a smart interview assistant. Speak only English. Interpret the candidate message with respect to the current question. If they ask for clarification, explain the question simply. If they try to change a previous answer, politely refuse and remind that only the first answer counts. If the message is a suitable answer, accept it. Return JSON only: {"action":"answer|clarify|refuse_change|other","assistant_reply":"...","normalized_answer":"..."}. Do not add any text outside JSON.'
+  };
+  const user = {
+    role: 'user',
+    content: JSON.stringify({
+      job: { title: job.title, language: job.language },
+      question,
+      previous_answers: sessionDoc.answers || [],
+      candidate_message: message
+    })
+  };
+  try {
+    const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
+      { model: GROQ_MODEL, messages: [sys, user], temperature: 0.3 },
+      { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
+    );
+    const raw = resp?.data?.choices?.[0]?.message?.content || '{}';
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : { action:'other', assistant_reply:'', normalized_answer:'' }; }
+    return parsed;
+  } catch (e) {
+    return { action:'other', assistant_reply: '', normalized_answer:'' };
+  }
 }
 
 // (legacy helpers removed)
@@ -144,12 +215,16 @@ async function analyzeCandidate(job, answers) {
   const qa = answers.map(a => ({ question: a.question, answer: a.answer }));
   const sys = {
     role: 'system',
-    content: 'You are a senior technical interviewer. Be concise, fair, and specific. Always return strict JSON and nothing else.'
+    content: (job.language||'en')==='ar'
+      ? 'أنت مُقابِل تقني متمرس. قيّم المرشح بناءً على تفاصيل الوظيفة والإجابات. كُن منصفًا ومحددًا. أعد JSON صارم فقط ولا تُضِف نصًا خارجه.'
+      : 'You are a senior technical interviewer. Evaluate the candidate based on the role details and answers. Be fair, concise, and specific. Return strict JSON only and nothing else.'
   };
 
   const user = {
     role: 'user',
-    content: `You are a senior technical interviewer. Evaluate this applicant strictly based on the role below.\n\nROLE DETAILS:\nTitle: ${job.title}\nDescription: ${job.description || ''}\nResponsibilities: ${job.responsibilities || ''}\nRequirements: ${job.requirements || ''}\nSkills: ${job.skills || ''}\nBenefits: ${job.benefits || ''}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`Q${i+1}: ${x.question}\nA${i+1}: ${x.answer}`).join('\n')}\n\nEvaluate and return a JSON with:\n{\n  "score": "number from 0 to 100",\n  "strengths": "bullet points",\n  "weaknesses": "bullet points",\n  "decision": "Hire / Maybe / Reject",\n  "summary": "one short paragraph"\n}`
+    content: (job.language||'en')==='ar'
+      ? `قيّم هذا المرشح بناءً على تفاصيل الوظيفة التالية.\n\nتفاصيل الدور:\nالعنوان: ${job.title}\nالوصف: ${job.description || ''}\nالمسؤوليات: ${job.responsibilities || ''}\nالمتطلبات: ${job.requirements || ''}\nالمهارات: ${job.skills || ''}\nالمزايا: ${job.benefits || ''}\n\nإجابات المرشح:\n${qa.map((x,i)=>`س${i+1}: ${x.question}\nج${i+1}: ${x.answer}`).join('\n')}\n\nأعد JSON فقط بالشكل:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
+      : `Evaluate this applicant strictly based on the role below.\n\nROLE DETAILS:\nTitle: ${job.title}\nDescription: ${job.description || ''}\nResponsibilities: ${job.responsibilities || ''}\nRequirements: ${job.requirements || ''}\nSkills: ${job.skills || ''}\nBenefits: ${job.benefits || ''}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`Q${i+1}: ${x.question}\nA${i+1}: ${x.answer}`).join('\n')}\n\nReturn strict JSON:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
   };
 
   try {
@@ -173,7 +248,7 @@ async function analyzeCandidate(job, answers) {
     return parsed;
   } catch (err) {
     console.error('Groq error:', err?.response?.data || err.message);
-    return { score: 0, strengths: '', weaknesses: '', decision: 'Maybe', summary: 'AI analysis failed; manual review required.' };
+    return { score: 0, strengths: [], weaknesses: [], decision: 'review', summary: 'AI analysis failed; manual review required.' };
   }
 }
 
@@ -188,9 +263,9 @@ async function finalizeAndNotify(job, sessionDoc) {
       jobId: job.jobId || job.id,
       answers: (sessionDoc.answers || []).map(a => ({ question: a.question, answer: a.answer })),
       aiScore: Number(analysis.score || 0),
-      aiStrengths: String(analysis.strengths || ''),
-      aiWeaknesses: String(analysis.weaknesses || ''),
-      aiDecision: String(analysis.decision || 'Maybe'),
+      aiStrengths: Array.isArray(analysis.strengths) ? analysis.strengths.map(String) : (analysis.strengths ? [String(analysis.strengths)] : []),
+      aiWeaknesses: Array.isArray(analysis.weaknesses) ? analysis.weaknesses.map(String) : (analysis.weaknesses ? [String(analysis.weaknesses)] : []),
+      aiDecision: String(analysis.decision || 'review'),
       aiSummary: String(analysis.summary || ''),
     });
   }
@@ -227,21 +302,25 @@ app.post('/webhook', async (req, res) => {
   // Session
   let sessionDoc = dbReady ? await Session.findOne({ applicantPhone: from, jobId: job.jobId, completedAt: null }) : null;
 
-  // Start phrase recognition (Arabic "ابدأ عزّام" or English 'start')
+  // Start phrase recognition (based on job.language)
   const normalizedMsg = message.normalize('NFKC').toLowerCase();
-  const isStart = /ابد|ابدا|ابدأ|start/.test(normalizedMsg);
+  const isStart = isStartMessage(job, normalizedMsg);
 
   if (!sessionDoc) {
     if (!isStart) {
-      await sendWhatsApp(fromWa, `للبدء اكتب: ابدأ عزّام\nTo start, type: start`);
+      // Hint to start based on language
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.start_hint'));
       return res.send('OK');
     }
     if (dbReady) {
       sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [] });
     }
-    // Intro + first question
-    await sendWhatsApp(fromWa, `مرحبا! Welcome to ${job.title} assessment. I will ask ${job.questions.length} questions.`);
-    await sendWhatsApp(fromWa, `Q1/${job.questions.length}: ${job.questions[0]}`);
+    // First question
+    if ((job.questions||[]).length > 0) {
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: 1, total: job.questions.length, question: job.questions[0] }));
+    } else {
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.no_questions'));
+    }
     return res.send('OK');
   }
 
@@ -251,20 +330,34 @@ app.post('/webhook', async (req, res) => {
     sessionDoc.processedMessageSids.push(messageSid);
   }
 
-  // Record first answer for current question only
+  // Conversational handling for current question
   const idx = sessionDoc.currentIndex || 0;
-  if (idx < job.questions.length) {
-    if ((sessionDoc.answers || []).length === idx) {
-      sessionDoc.answers.push({ question: job.questions[idx], answer: message });
-      sessionDoc.currentIndex = idx + 1;
-      if (dbReady) await sessionDoc.save();
+  if (idx < (job.questions||[]).length) {
+    const q = job.questions[idx];
+    const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+    const action = guidance?.action || 'other';
+    const reply = guidance?.assistant_reply || '';
+    if (action === 'clarify' || action === 'other' || action === 'refuse_change') {
+      if (reply) await sendWhatsApp(fromWa, reply);
+      if (action !== 'refuse_change') {
+        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      }
+      return res.send('OK');
+    }
+    if (action === 'answer') {
+      if ((sessionDoc.answers || []).length === idx) {
+        const ans = guidance?.normalized_answer || message;
+        sessionDoc.answers.push({ question: q, answer: ans });
+        sessionDoc.currentIndex = idx + 1;
+        if (dbReady) await sessionDoc.save();
+      }
     }
   }
 
   // Ask next or finalize
   if (sessionDoc.currentIndex < job.questions.length) {
     const nextIdx = sessionDoc.currentIndex;
-    await sendWhatsApp(fromWa, `Q${nextIdx + 1}/${job.questions.length}: ${job.questions[nextIdx]}`);
+    await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: nextIdx+1, total: job.questions.length, question: job.questions[nextIdx] }));
     return res.send('OK');
   }
 
@@ -273,26 +366,28 @@ app.post('/webhook', async (req, res) => {
     sessionDoc.completedAt = new Date();
     if (dbReady) await sessionDoc.save();
     await finalizeAndNotify(job, sessionDoc);
-    await sendWhatsApp(fromWa, 'Thank you for applying, wishing you all the best 👏');
+    await sendWhatsApp(fromWa, buildFinalMessage(job));
   }
   return res.send('OK');
 });
 
 // HR API: create job
 app.post('/api/jobs', async (req, res) => {
-  const { title, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
-  if (!title || !Array.isArray(questions) || questions.length === 0) {
-    return res.status(400).json({ error: 'title and questions[] are required' });
+  const { title, language, description, responsibilities, requirements, skills, benefits, questions, recipients } = req.body || {};
+  if (!title) {
+    return res.status(400).json({ error: 'title is required' });
   }
+  const lang = (language === 'ar' || language === 'en') ? language : 'en';
   const doc = {
     jobId: generateJobId(),
     title,
+    language: lang,
     description: description || '',
     responsibilities: responsibilities || '',
     requirements: requirements || '',
     skills: skills || '',
     benefits: benefits || '',
-    questions: questions.map(String),
+    questions: Array.isArray(questions) ? questions.map(String) : [],
     candidateRecipients: Array.isArray(recipients) ? recipients.map(String) : [],
   };
   if (dbReady) {

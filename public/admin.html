@@ -199,7 +199,10 @@
             e('h3', { className:'title', style:{marginRight:'auto'} }, job.title),
             e('span', { className:'chip' }, job.jobId)
           ]),
-          e('div', { className:'muted', style:{margin:'4px 0 8px'} }, `${(job.questions||[]).length} questions • ${new Date(job.createdAt||Date.now()).toLocaleString()}`),
+          e('div', { className:'inline-actions', style:{margin:'4px 0 8px'} }, [
+            e('span', { className:'chip' }, (job.language||'en').toUpperCase()),
+            e('span', { className:'muted', style:{marginLeft:'auto'} }, `${(job.questions||[]).length} questions • ${(job.candidateRecipients||[]).length} candidates`)
+          ]),
         ]);
       }
 
@@ -237,6 +240,7 @@
 
       function JobDetailsTab({ job, onSaved }) {
         const [title, setTitle] = useState(job.title||'');
+        const [language] = useState(job.language||'en');
         const [description, setDescription] = useState(job.description||'');
         const [responsibilities, setResponsibilities] = useState(job.responsibilities||'');
         const [requirements, setRequirements] = useState(job.requirements||'');
@@ -252,10 +256,12 @@
           if (!res.ok) return alert('Failed to save');
           const data = await res.json();
           onSaved && onSaved(data.job);
+          alert('Saved successfully');
         };
         return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} }, [
           e('div', { className:'col', style:{gridColumn:'span 6'} }, [
             TextInput({label:'Job Title', value:title, set:setTitle}),
+            e('div', {}, [ e('label', {}, 'Language'), e('div', { className:'chip', style:{ display:'inline-block', marginTop:6 } }, language.toUpperCase()) ]),
             TextArea({label:'Description', value:description, set:setDescription, rows:5}),
             TextArea({label:'Responsibilities', value:responsibilities, set:setResponsibilities, rows:5}),
             TextArea({label:'Requirements', value:requirements, set:setRequirements, rows:5}),
@@ -298,8 +304,8 @@
               e('details', {}, [
                 e('summary', { className:'muted' }, 'AI Summary'),
                 e('div', { className:'rows', style:{marginTop:10} }, [
-                  e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, s.aiStrengths || '-')]),
-                  e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, s.aiWeaknesses || '-')]),
+                  e('div', {}, [e('div', { className:'muted' }, 'Strengths'), e('div', {}, (Array.isArray(s.aiStrengths)? s.aiStrengths.join(' • ') : (s.aiStrengths||'-')) )]),
+                  e('div', {}, [e('div', { className:'muted' }, 'Weaknesses'), e('div', {}, (Array.isArray(s.aiWeaknesses)? s.aiWeaknesses.join(' • ') : (s.aiWeaknesses||'-')) )]),
                   e('div', {}, [e('div', { className:'muted' }, 'Summary'), e('div', {}, s.aiSummary || '-')])
                 ])
               ])
@@ -329,18 +335,54 @@
         ]);
       }
 
+      function CreateJobModal({ open, onClose, onCreated }){
+        const [title, setTitle] = useState('');
+        const [language, setLanguage] = useState('en');
+        const [busy, setBusy] = useState(false);
+        if (!open) return null;
+        const submit = async () => {
+          if (!title) return alert('Please enter a job title');
+          setBusy(true);
+          const res = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, language }) });
+          setBusy(false);
+          if (!res.ok) return alert('Failed to create job');
+          const data = await res.json();
+          onCreated && onCreated(data.job);
+        };
+        return e('div', { style:{position:'fixed', inset:0, background:'rgba(0,0,0,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000} },
+          e('div', { className:'card', style:{width:420} }, [
+            e('h3', { className:'title' }, 'Create Job'),
+            e('div', { className:'rows' }, [
+              TextInput({label:'Job Title', value:title, set:setTitle, placeholder:'e.g., Backend Engineer'}),
+              e('div', {}, [
+                e('label', {}, 'Job Language'),
+                e('select', { value:language, onChange:(ev)=>setLanguage(ev.target.value), style:{ width:'100%', background:'rgba(255,255,255,.04)', border:'1px solid var(--stroke)', color:'var(--text)', borderRadius:10, padding:10 } }, [
+                  e('option', { value:'ar' }, 'العربية (ar)'),
+                  e('option', { value:'en' }, 'English (en)')
+                ])
+              ])
+            ]),
+            e('div', { className:'inline-actions', style:{marginTop:12} }, [
+              e('button', { className:'btn', onClick:onClose }, 'Cancel'),
+              e('button', { className:'btn primary', onClick:submit, disabled:busy }, busy?'Creating...':'Continue')
+            ])
+          ])
+        );
+      }
+
       function App() {
-        const [page, setPage] = useState('list'); // 'list' | 'create' | 'details'
+        const [page, setPage] = useState('list'); // 'list' | 'details'
         const [selected, setSelected] = useState(null);
+        const [modalOpen, setModalOpen] = useState(false);
         useEffect(()=>{
           const jobsBtn = document.getElementById('nav-jobs');
           const createBtn = document.getElementById('nav-create');
-          jobsBtn.onclick = ()=> setPage('list');
-          createBtn.onclick = ()=> setPage('create');
+          jobsBtn.onclick = ()=> { setPage('list'); setModalOpen(false); };
+          createBtn.onclick = ()=> setModalOpen(true);
         },[]);
         return e('div', { className:'rows' }, [
-          page==='list' && e(JobList, { onSelect: (j)=>{ setSelected(j); setPage('details'); }, onCreate: ()=>setPage('create') }),
-          page==='create' && e(CreateJob, { onCreated: (j)=>{ setSelected(j); setPage('details'); }, onCancel: ()=>setPage('list') }),
+          e(CreateJobModal, { open: modalOpen, onClose: ()=>setModalOpen(false), onCreated: (j)=>{ setSelected(j); setModalOpen(false); setPage('details'); } }),
+          page==='list' && e(JobList, { onSelect: (j)=>{ setSelected(j); setPage('details'); } }),
           page==='details' && selected && e(JobDetailsPage, { job: selected, onBack: ()=>setPage('list') })
         ]);
       }
