@@ -36,6 +36,8 @@
       .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px; grid-auto-flow:row dense}
       .card{background:var(--surface); border:1px solid var(--stroke); border-radius:16px; padding:18px; box-shadow:0 10px 28px rgba(0,0,0,.25), 0 6px 16px rgba(34,197,94,.06)}
       .card:hover{border-color:#246b52}
+      /* Equal-height job cards */
+      .job-card{min-height:140px; display:flex; flex-direction:column; justify-content:space-between; height:100%}
       .muted{color:var(--muted)}
       .chips{display:flex; flex-wrap:wrap; gap:6px}
       .chip{background:rgba(255,255,255,.06); border:1px solid var(--stroke); padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted)}
@@ -168,7 +170,7 @@
       }
 
       function JobCard({ job, onOpen }){
-        return e('div', { className:'card', onClick:()=>onOpen(job), style:{cursor:'pointer'} }, [
+        return e('div', { className:'card job-card', onClick:()=>onOpen(job), style:{cursor:'pointer'} }, [
           e('div', { className:'inline-actions' }, [
             e('h3', { className:'title', style:{marginRight:'auto'} }, job.title),
             e('span', { className:'chip' }, job.jobId)
