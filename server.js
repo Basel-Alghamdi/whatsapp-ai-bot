@@ -23,6 +23,13 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
+// Startup log for LLM provider
+if (OPENAI_API_KEY) {
+  console.log(`[Startup] Using OpenAI model: ${OPENAI_MODEL}`);
+} else {
+  console.warn('[Startup] OPENAI_API_KEY not set. LLM calls will not proceed.');
+}
+
 // Load locales for i18n (server-side only for WhatsApp messages)
 const locales = {};
 function loadLocales(){
@@ -211,20 +218,15 @@ async function converseOnAnswer({ job, sessionDoc, question, message }) {
     { role: 'user', content: JSON.stringify({ job: { title: job.title }, question, previous_answers: sessionDoc.answers || [], candidate_message: message }) }
   ];
   try {
-    let resp;
-    if (OPENAI_API_KEY) {
-      resp = await axios.post('https://api.openai.com/v1/chat/completions',
-        { model: OPENAI_MODEL, messages, temperature: 0.3 },
-        { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
-      );
-    } else if (GROQ_API_KEY) {
-      resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
-        { model: GROQ_MODEL, messages, temperature: 0.3 },
-        { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
-      );
-    } else {
+    if (!OPENAI_API_KEY) {
+      console.error('[LLM] OpenAI key missing; cannot use gpt-4.1-nano');
       return { action:'ask_again', assistant_reply: '', normalized_answer: null };
     }
+    console.log(`[LLM] converse using OpenAI ${OPENAI_MODEL}`);
+    const resp = await axios.post('https://api.openai.com/v1/chat/completions',
+      { model: OPENAI_MODEL, messages, temperature: 0.3 },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
+    );
     const raw = resp?.data?.choices?.[0]?.message?.content || '{}';
     let parsed; try { parsed = JSON.parse(raw); } catch(_) { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; }
     return {
@@ -256,9 +258,14 @@ async function analyzeCandidate(job, answers) {
   };
 
   try {
-    const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
-      { model: GROQ_MODEL, messages: [sys, user], temperature: 0.2 },
-      { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
+    if (!OPENAI_API_KEY) {
+      console.error('[LLM] OpenAI key missing; cannot analyze with gpt-4.1-nano');
+      throw new Error('OpenAI key missing');
+    }
+    console.log(`[LLM] analyze using OpenAI ${OPENAI_MODEL}`);
+    const resp = await axios.post('https://api.openai.com/v1/chat/completions',
+      { model: OPENAI_MODEL, messages: [sys, user], temperature: 0.2 },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
     );
 
     const raw = resp?.data?.choices?.[0]?.message?.content || '{}';
