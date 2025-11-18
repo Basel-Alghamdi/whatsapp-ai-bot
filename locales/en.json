@@ -55,9 +55,9 @@
   },
   "submission": {
     "score": "Score",
-    "review": "Review",
+    "decision_strong": "Strong Fit",
+    "decision_recommended": "Recommended",
     "decision_review": "Review",
-    "decision_accept": "Accept",
-    "decision_reject": "Reject"
+    "decision_weak": "Weak"
   }
 }

@@ -55,9 +55,9 @@
   },
   "submission": {
     "score": "الدرجة",
-    "review": "مراجعة مطلوبة",
+    "decision_strong": "ملائم جدًا",
+    "decision_recommended": "موصى به",
     "decision_review": "مراجعة مطلوبة",
-    "decision_accept": "مقبول",
-    "decision_reject": "مرفوض"
+    "decision_weak": "ضعيف"
   }
 }

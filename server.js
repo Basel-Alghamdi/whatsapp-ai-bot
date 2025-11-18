@@ -12,9 +12,10 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
 const client = require('twilio')(accountSid, authToken);
 
-// Groq (OpenAI-compatible API)
+// OpenAI (primary) and Groq (fallback)
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-nano';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-// Default to a free/fast model; can be overridden via env
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 // Basic app
@@ -88,6 +89,11 @@ const SessionSchema = new mongoose.Schema(
     processedMessageSids: [String],
     startedAt: { type: Date, default: Date.now },
     completedAt: { type: Date, default: null },
+    interviewStarted: { type: Boolean, default: false },
+    expectingClarification: { type: Boolean, default: false },
+    lastUserAnswer: { type: String, default: '' },
+    pendingQuestion: { type: String, default: '' },
+    conversationHistory: [{ role: String, content: String }],
   },
   { timestamps: false }
 );
@@ -161,7 +167,10 @@ function toWhatsApp(number) {
 
 function buildWelcomeMessage(job) {
   const lang = (job.language||'en');
-  return t(lang, 'whatsapp.welcome', { jobTitle: job.title });
+  if (lang === 'ar') {
+    return `مرحبًا 👋\nأنا عزّام، المساعد الذكي للتوظيف في الشركة.\nاطلعت على طلبك وبسألك كم سؤال للتعرّف عليك أكثر.\nإذا كنت جاهز، خبرني بأي كلمة مثل: جاهز، خلّنا نبدأ، تمام.`;
+  }
+  return `Hi 👋\nI’m Azzam, the intelligent hiring assistant for the company.\nI reviewed your application and will ask a few quick questions to get to know you better.\nIf you’re ready, let me know with any phrase like: ready, let’s start, okay.`;
 }
 
 function buildFinalMessage(job) {
@@ -170,40 +179,59 @@ function buildFinalMessage(job) {
 
 function isStartMessage(job, message) {
   const m = (message || '').trim().toLowerCase();
-  if ((job.language || 'en') === 'ar') {
-    return /(ابدأ\s*عزّام|ابدا\s*عزام|ابدا\s*عزّام|ابدأ|ابدا)/.test(m);
-  }
-  return /(start\s*azzam|start)/.test(m);
+  const arReady = /(جاهز|يلا|تمام|خلنا نبدأ|خلّنا نبدأ|ابدا|ابدأ|لنبدأ|نبدأ)/;
+  const enReady = /(ready|let\s*'?s\s*start|lets\s*start|okay\s*let'?s\s*begin|ok\s*begin|begin|start)/;
+  return ((job.language||'en')==='ar') ? arReady.test(m) : (arReady.test(m) || enReady.test(m));
+}
+
+function isClarification(message) {
+  const m = (message || '').trim().toLowerCase();
+  return /(ما\s*فهمت|وضح|توضيح|اشرح|شرح|explain|what\s+do\s+you\s+mean|i\s+don'?t\s+understand|not\s+understand)/.test(m);
+}
+
+function isUserQuestion(message) {
+  const m = (message || '').trim();
+  if (m.endsWith('?')) return true;
+  const lower = m.toLowerCase();
+  return /\b(what|why|how|when|where|which|who)\b/.test(lower) || /(كيف|لماذا|متى|أين|اين|كم)/.test(lower);
+}
+
+function isProbablyAnswer(message) {
+  const m = (message || '').trim();
+  if (!m) return false;
+  if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m)) return false;
+  return true;
 }
 
 async function converseOnAnswer({ job, sessionDoc, question, message }) {
-  // Conversational AI: accepts updates, clarifies, guides; never refuses changes
-  const lang = job.language || 'en';
-  const sys = {
-    role: 'system',
-    content: lang === 'ar'
-      ? 'أنت "عزّام" مساعد مقابلات ذكي، تتحدث العربية فقط. تصرّف كمقابل بشري: إذا طلب المرشح توضيحًا فاشرح السؤال ثم أعد طرحه، إذا كانت الإجابة غير واضحة فاطلب توضيحًا بلطف، وإذا كانت غير مرتبطة فقم بتوجيهه. إذا أراد تغيير إجابته فاقبل التغيير طبيعيًا. أعد JSON فقط بالشكل: {"assistant_reply":"...","normalized_answer": null أو نص، "action":"answer"|"clarify"|"ask_again"|"guide"}. لا تُضِف أي نص خارج JSON.'
-      : 'You are "Azzam", a smart interview assistant. Speak only English. Act like a human interviewer: if the candidate asks for clarification, explain and then re-ask; if the answer is unclear, politely ask for a clearer answer; if unrelated, guide them. If the candidate wants to change an answer, accept the new answer normally. Return JSON only: {"assistant_reply":"...","normalized_answer": null or text, "action":"answer"|"clarify"|"ask_again"|"guide"}. Do not add any text outside JSON.'
-  };
-  const user = {
-    role: 'user',
-    content: JSON.stringify({
-      job: { title: job.title, language: job.language },
-      question,
-      previous_answers: sessionDoc.answers || [],
-      candidate_message: message
-    })
-  };
+  const lang = job.language || 'ar';
+  const finalPrompt = `You are **Azzam**, the intelligent hiring assistant representing the company.\nYou behave exactly like a human recruiter — professional, friendly, clear, and confident.\n\n─────────────────────────────────────────\n# GENERAL BEHAVIOR RULES\n\n1. Never repeat the same question unless:\n   - the candidate asks for clarification, OR\n   - the candidate’s answer is completely irrelevant.\n\n2. ALWAYS classify the candidate’s message as one of the following:\n   - a valid answer\n   - a clarification request (“ما فهمت / explain / what do you mean?”)\n   - a readiness message (“جاهز / let's start / ready / يلا / start / begin / تمام…”)\n   - a question from the user\n   - irrelevant text\n\n3. If the candidate sends a readiness message, immediately begin with Question 1. Do NOT require a specific keyword.\n\n4. If the candidate requests clarification, explain clearly and simply, then re-ask the question once only.\n\n5. If the candidate gives an answer, acknowledge briefly and move to the next question.\n\n6. If the answer is unclear, ask politely for clarification without repeating the whole question.\n\n7. If the message is unrelated, redirect politely.\n\n8. Never mention system logic, AI rules, or being an AI model.\n\n9. Speak on behalf of the company using “we”.\n\n─────────────────────────────────────────\n# PERSONALITY\n- sound human\n- keep responses short and natural\n- respond appropriately to slang\n- maintain memory of previous responses\n- use ${lang === 'ar' ? 'Arabic' : 'English'} by default (unless the candidate switches)\n\nOutput strict JSON only:\n{\n  "assistant_reply": "...",\n  "normalized_answer": "... or null",\n  "action": "answer" | "clarify" | "ask_again" | "guide"\n}`;
+  const messages = [
+    { role: 'system', content: finalPrompt },
+    { role: 'user', content: JSON.stringify({ job: { title: job.title }, question, previous_answers: sessionDoc.answers || [], candidate_message: message }) }
+  ];
   try {
-    const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
-      { model: GROQ_MODEL, messages: [sys, user], temperature: 0.3 },
-      { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
-    );
+    let resp;
+    if (OPENAI_API_KEY) {
+      resp = await axios.post('https://api.openai.com/v1/chat/completions',
+        { model: OPENAI_MODEL, messages, temperature: 0.3 },
+        { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
+      );
+    } else if (GROQ_API_KEY) {
+      resp = await axios.post('https://api.groq.com/openai/v1/chat/completions',
+        { model: GROQ_MODEL, messages, temperature: 0.3 },
+        { headers: { Authorization: `Bearer ${GROQ_API_KEY}` } }
+      );
+    } else {
+      return { action:'ask_again', assistant_reply: '', normalized_answer: null };
+    }
     const raw = resp?.data?.choices?.[0]?.message?.content || '{}';
-    let parsed;
-    try { parsed = JSON.parse(raw); }
-    catch { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : { action:'ask_again', assistant_reply:'', normalized_answer:null }; }
-    return parsed;
+    let parsed; try { parsed = JSON.parse(raw); } catch(_) { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; }
+    return {
+      assistant_reply: String(parsed.assistant_reply || ''),
+      normalized_answer: parsed.normalized_answer ?? null,
+      action: String(parsed.action || 'ask_again')
+    };
   } catch (e) {
     return { action:'ask_again', assistant_reply: '', normalized_answer: null };
   }
@@ -245,12 +273,12 @@ async function analyzeCandidate(job, answers) {
     let score = Math.round(Number(parsed.score ?? 0));
     if (!Number.isFinite(score)) score = 0;
     if (score < 0) score = 0; if (score > 100) score = 100;
-    let decision = (parsed.decision || '').toString().toLowerCase();
-    if (!['accept','review','reject'].includes(decision)) {
-      if (score >= 75) decision = 'accept';
-      else if (score >= 60) decision = 'review';
-      else decision = 'reject';
-    }
+    // Standardized decision mapping (server-authoritative)
+    let decision;
+    if (score >= 85) decision = 'strong';
+    else if (score >= 75) decision = 'recommended';
+    else if (score >= 60) decision = 'review';
+    else decision = 'weak';
     return {
       score,
       strengths: Array.isArray(parsed.strengths) ? parsed.strengths : (parsed.strengths ? [String(parsed.strengths)] : []),
@@ -319,13 +347,13 @@ app.post('/webhook', async (req, res) => {
   const isStart = isStartMessage(job, normalizedMsg);
 
   if (!sessionDoc) {
+    // Create session only on readiness; otherwise send intro
     if (!isStart) {
-      // Hint to start based on language
-      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.start_hint'));
+      await sendWhatsApp(fromWa, buildWelcomeMessage(job));
       return res.send('OK');
     }
     if (dbReady) {
-      sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [] });
+      sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [], interviewStarted: true, pendingQuestion: (job.questions||[])[0] || '' });
     }
     // First question
     if ((job.questions||[]).length > 0) {
@@ -346,6 +374,31 @@ app.post('/webhook', async (req, res) => {
   const idx = sessionDoc.currentIndex || 0;
   if (idx < (job.questions||[]).length) {
     const q = job.questions[idx];
+    // Heuristic classification: readiness starts Q1 if not started
+    if (!sessionDoc.interviewStarted && isStartMessage(job, message)) {
+      sessionDoc.interviewStarted = true;
+      if (dbReady) await sessionDoc.save();
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: 1, total: job.questions.length, question: q }));
+      return res.send('OK');
+    }
+    // Clarification intent shortcut
+    if (isClarification(message)) {
+      const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+      const reply = guidance?.assistant_reply || '';
+      if (reply) await sendWhatsApp(fromWa, reply);
+      // Re-ask once only
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      return res.send('OK');
+    }
+    // User question → guide politely
+    if (isUserQuestion(message) && !isProbablyAnswer(message)) {
+      const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+      const reply = guidance?.assistant_reply || '';
+      if (reply) await sendWhatsApp(fromWa, reply);
+      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      return res.send('OK');
+    }
+    // Default: use model to decide
     const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
     const action = guidance?.action || 'ask_again';
     const reply = guidance?.assistant_reply || '';
@@ -364,7 +417,10 @@ app.post('/webhook', async (req, res) => {
       if (dbReady) await sessionDoc.save();
     } else {
       if (reply) await sendWhatsApp(fromWa, reply);
-      await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      // For clarify → re-ask once; for ask_again/guide → do not spam full question
+      if (action === 'clarify') {
+        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+      }
       return res.send('OK');
     }
   }
