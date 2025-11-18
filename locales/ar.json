@@ -55,9 +55,9 @@
   },
   "submission": {
     "score": "الدرجة",
-    "review": "مراجعة",
-    "decision_review": "مراجعة",
-    "decision_accept": "قبول",
-    "decision_reject": "رفض"
+    "review": "مراجعة مطلوبة",
+    "decision_review": "مراجعة مطلوبة",
+    "decision_accept": "مقبول",
+    "decision_reject": "مرفوض"
   }
 }

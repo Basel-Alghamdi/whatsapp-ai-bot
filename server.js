@@ -216,14 +216,14 @@ async function analyzeCandidate(job, answers) {
   const sys = {
     role: 'system',
     content: (job.language||'en')==='ar'
-      ? 'أنت مُقابِل تقني متمرس. قيّم المرشح بناءً على تفاصيل الوظيفة والإجابات. كُن منصفًا ومحددًا. أعد JSON صارم فقط ولا تُضِف نصًا خارجه.'
-      : 'You are a senior technical interviewer. Evaluate the candidate based on the role details and answers. Be fair, concise, and specific. Return strict JSON only and nothing else.'
+      ? 'أنت مُقابِل تقني متمرس. قيّم المرشح بعدالة وفق معايير واضحة، وأعد JSON صارم فقط. استخدم مقياس 0–100 حيث 100 ممتاز. عاير الدرجات إنسانيًا: المرشح المتوسط بين 55–85 غالبًا. طبّق محاور التقييم بالأوزان: الوضوح 25%، الملاءمة 35%، الاكتمال 25%، عمق الخبرة 15%. ثم احسب decision وفق العتبات: accept إذا score ≥ 75، review إذا 60–74، reject إذا < 60. لا تُضِف أي نص خارج JSON.'
+      : 'You are a senior technical interviewer. Score fairly with a human-calibrated 0–100 scale (100 = excellent). Typical average candidates should land around 55–85 unless answers are truly poor. Use weighted rubric: clarity 25%, relevance 35%, completeness 25%, experience-depth 15%. Then set decision by thresholds: accept if score ≥ 75; review if 60–74; reject if < 60. Return strict JSON only.'
   };
 
   const user = {
     role: 'user',
     content: (job.language||'en')==='ar'
-      ? `قيّم هذا المرشح بناءً على تفاصيل الوظيفة التالية.\n\nتفاصيل الدور:\nالعنوان: ${job.title}\nالوصف: ${job.description || ''}\nالمسؤوليات: ${job.responsibilities || ''}\nالمتطلبات: ${job.requirements || ''}\nالمهارات: ${job.skills || ''}\nالمزايا: ${job.benefits || ''}\n\nإجابات المرشح:\n${qa.map((x,i)=>`س${i+1}: ${x.question}\nج${i+1}: ${x.answer}`).join('\n')}\n\nأعد JSON فقط بالشكل:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
+      ? `قيّم هذا المرشح بناءً على تفاصيل الوظيفة التالية.\n\nتفاصيل الدور:\nالعنوان: ${job.title}\nالوصف: ${job.description || ''}\nالمسؤوليات: ${job.responsibilities || ''}\nالمتطلبات: ${job.requirements || ''}\nالمهارات: ${job.skills || ''}\nالمزايا: ${job.benefits || ''}\ن\nإجابات المرشح:\n${qa.map((x,i)=>`س${i+1}: ${x.question}\nج${i+1}: ${x.answer}`).join('\n')}\n\nأعد JSON فقط بالشكل:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
       : `Evaluate this applicant strictly based on the role below.\n\nROLE DETAILS:\nTitle: ${job.title}\nDescription: ${job.description || ''}\nResponsibilities: ${job.responsibilities || ''}\nRequirements: ${job.requirements || ''}\nSkills: ${job.skills || ''}\nBenefits: ${job.benefits || ''}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`Q${i+1}: ${x.question}\nA${i+1}: ${x.answer}`).join('\n')}\n\nReturn strict JSON:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
   };
 
@@ -239,13 +239,25 @@ async function analyzeCandidate(job, answers) {
       parsed = JSON.parse(raw);
     } catch (_) {
       const match = raw.match(/\{[\s\S]*\}/);
-      if (match) {
-        parsed = JSON.parse(match[0]);
-      } else {
-        throw new Error('Failed to parse JSON from Groq response');
-      }
+      parsed = match ? JSON.parse(match[0]) : {};
     }
-    return parsed;
+    // Post-process: clamp score and derive decision if missing
+    let score = Math.round(Number(parsed.score ?? 0));
+    if (!Number.isFinite(score)) score = 0;
+    if (score < 0) score = 0; if (score > 100) score = 100;
+    let decision = (parsed.decision || '').toString().toLowerCase();
+    if (!['accept','review','reject'].includes(decision)) {
+      if (score >= 75) decision = 'accept';
+      else if (score >= 60) decision = 'review';
+      else decision = 'reject';
+    }
+    return {
+      score,
+      strengths: Array.isArray(parsed.strengths) ? parsed.strengths : (parsed.strengths ? [String(parsed.strengths)] : []),
+      weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : (parsed.weaknesses ? [String(parsed.weaknesses)] : []),
+      decision,
+      summary: String(parsed.summary || '')
+    };
   } catch (err) {
     console.error('Groq error:', err?.response?.data || err.message);
     return { score: 0, strengths: [], weaknesses: [], decision: 'review', summary: 'AI analysis failed; manual review required.' };
