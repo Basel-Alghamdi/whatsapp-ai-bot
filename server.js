@@ -20,6 +20,9 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 // Basic app
 const app = express();
+// Public health endpoint (must be available before any middleware)
+app.get('/health', (req, res) => res.status(200).send('OK'));
+// Safe to attach middleware after health
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
@@ -667,6 +670,6 @@ app.get(['/','/admin'], (_, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] Running on port ${PORT}`);
 });
