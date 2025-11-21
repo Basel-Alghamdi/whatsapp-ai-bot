@@ -163,7 +163,13 @@ function generateJobId() {
 }
 
 async function sendWhatsApp(to, body) {
-  return client.messages.create({ from: twilioFrom, to, body });
+  try {
+    if (!to || !body) return null;
+    return await client.messages.create({ from: twilioFrom, to, body });
+  } catch (err) {
+    console.error('Twilio error:', err?.message || err);
+    return null;
+  }
 }
 
 function toWhatsApp(number) {
