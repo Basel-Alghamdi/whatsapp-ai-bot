@@ -1,5 +1,6 @@
 # Prevent committing local environment and logs
 .env
+node_modules
 *.log
 npm-debug.log*
 yarn-debug.log*

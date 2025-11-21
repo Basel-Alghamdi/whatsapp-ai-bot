@@ -88,6 +88,8 @@
       .ltr .phone{ text-align:left !important }
       .badge{ margin-inline-start:0 }
       .push{margin-inline-start:auto}
+      .modal{position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:1000}
+      .modal .actions{display:flex; gap:8px; margin-top:12px}
     </style>
   </head>
   <body>
@@ -376,10 +378,27 @@
       function JobDetailsPage({ job, onBack }) {
         const [tab, setTab] = useState('details');
         const [cur, setCur] = useState(job);
+        const [showDelete, setShowDelete] = useState(false);
+        const [showSend, setShowSend] = useState(false);
+        const doDelete = async () => {
+          const res = await fetch(`/api/jobs/${cur.jobId}`, { method:'DELETE' });
+          if (!res.ok) return alert(t('admin.failedDelete'));
+          alert(t('admin.deleted'));
+          onBack();
+        };
+        const sendMode = async (mode) => {
+          const res = await fetch(`/api/jobs/${cur.jobId}/send`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode }) });
+          if (!res.ok) return alert(t('admin.failedSend'));
+          const data = await res.json();
+          alert(t('admin.sentOk'));
+          setShowSend(false);
+        };
         return e('div', {}, [
           e('div', { className:'inline-actions', style:{marginBottom:12} }, [
             e('button', { className:'btn', onClick:onBack }, [ e('span', { className:'back-arrow' }, '←'), ' ', t('admin.back') ]),
-            e('div', { className:'push' })
+            e('div', { className:'push' }),
+            e('button', { className:'btn', onClick:()=>setShowSend(true) }, t('admin.send')),
+            e('button', { className:'btn', onClick:()=>setShowDelete(true) }, t('admin.delete'))
           ]),
           e('div', { className:'card' }, [
             e('div', { className:'inline-actions' }, [
@@ -390,7 +409,26 @@
               e('div', { className:'tab '+(tab==='subs'?'active':''), onClick:()=>setTab('subs') }, t('admin.submissions'))
             ]),
             tab==='details' ? e(JobDetailsTab, { job: cur, onSaved: setCur }) : e(JobSubmissionsTab, { job: cur })
-          ])
+          ]),
+          // Delete Modal
+          showDelete && e('div', { className:'modal' }, e('div', { className:'card', style:{width:420} }, [
+            e('h3', { className:'title' }, t('admin.deleteTitle')),
+            e('p', {}, t('admin.deleteText')),
+            e('div', { className:'actions' }, [
+              e('button', { className:'btn', onClick:()=>setShowDelete(false) }, t('admin.cancel')),
+              e('button', { className:'btn primary', onClick:doDelete }, t('admin.confirm'))
+            ])
+          ])),
+          // Send Modal
+          showSend && e('div', { className:'modal' }, e('div', { className:'card', style:{width:420} }, [
+            e('h3', { className:'title' }, t('admin.sendTitle')),
+            e('p', {}, t('admin.sendPrompt')),
+            e('div', { className:'actions' }, [
+              e('button', { className:'btn', onClick:()=>sendMode('all') }, t('admin.sendAll')),
+              e('button', { className:'btn primary', onClick:()=>sendMode('new') }, t('admin.sendNew')),
+              e('button', { className:'btn', onClick:()=>setShowSend(false) }, t('admin.cancel'))
+            ])
+          ]))
         ]);
       }
 

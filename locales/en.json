@@ -51,7 +51,20 @@
     "saved": "Saved successfully",
     "enterTitle": "Please enter a job title",
     "failedCreate": "Failed to create job",
-    "failedSave": "Failed to save"
+    "failedSave": "Failed to save",
+    "delete": "Delete",
+    "deleteTitle": "Delete Job",
+    "deleteText": "Are you sure you want to delete this job? This will remove related sessions and submissions.",
+    "confirm": "Confirm",
+    "deleted": "Job deleted",
+    "send": "Send",
+    "sendTitle": "Send Job Announcement",
+    "sendPrompt": "Do you want to send this job to ALL candidates, or only to NEW candidates who have not received it before?",
+    "sendAll": "Send to ALL candidates",
+    "sendNew": "Send only NEW candidates",
+    "failedDelete": "Failed to delete job",
+    "failedSend": "Failed to send",
+    "sentOk": "Send initiated"
   },
   "submission": {
     "score": "Score",

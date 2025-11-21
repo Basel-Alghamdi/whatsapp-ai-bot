@@ -20,6 +20,9 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 // Basic app
 const app = express();
+// Public health endpoint (must be available before any middleware)
+app.get('/health', (req, res) => res.status(200).send('OK'));
+// Safe to attach middleware after health
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
@@ -83,6 +86,7 @@ const JobSchema = new mongoose.Schema(
     benefits: String,
     questions: [String],
     candidateRecipients: [String],
+    sentRecipients: { type: [String], default: [] },
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );
@@ -483,8 +487,12 @@ app.post('/api/jobs', async (req, res) => {
       if (!to) continue;
       try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
     }
+    // mark as sent
+    created.sentRecipients = Array.from(new Set([...(created.sentRecipients||[]), ...(created.candidateRecipients||[])]));
+    await created.save();
     return res.json({ ok: true, job: created });
   } else {
+    doc.sentRecipients = Array.from(new Set([...(doc.sentRecipients||[]), ...(doc.candidateRecipients||[])]));
     fallbackJobs.set(doc.jobId, doc);
     const msg = buildWelcomeMessage(doc);
     for (const r of doc.candidateRecipients || []) {
@@ -518,6 +526,25 @@ app.get('/api/jobs/:jobId', async (req, res) => {
   res.json(job);
 });
 
+// HR API: delete job (and related sessions/submissions)
+app.delete('/api/jobs/:jobId', async (req, res) => {
+  const jobId = req.params.jobId;
+  if (dbReady) {
+    const job = await Job.findOne({ jobId });
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    await Promise.all([
+      Job.deleteOne({ jobId }),
+      Session.deleteMany({ jobId }),
+      Submission.deleteMany({ jobId })
+    ]);
+    return res.json({ ok: true });
+  } else {
+    if (!fallbackJobs.has(jobId)) return res.status(404).json({ error: 'Not found' });
+    fallbackJobs.delete(jobId);
+    return res.json({ ok: true, warning: 'No DB configured; removed from memory only.' });
+  }
+});
+
 // HR API: update job (send welcome only to newly added candidate numbers)
 app.put('/api/jobs/:jobId', async (req, res) => {
   const jobId = req.params.jobId;
@@ -547,6 +574,8 @@ app.put('/api/jobs/:jobId', async (req, res) => {
       if (!to) continue;
       try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
     }
+    job.sentRecipients = Array.from(new Set([...(job.sentRecipients||[]), ...newOnly]));
+    await job.save();
     return res.json({ ok: true, job });
   } else {
     const job = fallbackJobs.get(jobId);
@@ -570,8 +599,35 @@ app.put('/api/jobs/:jobId', async (req, res) => {
       if (!to) continue;
       try { await sendWhatsApp(to, msg); } catch (e) { console.warn('Welcome send failed', r, e.message); }
     }
+    job.sentRecipients = Array.from(new Set([...(job.sentRecipients||[]), ...newOnly]));
     return res.json({ ok: true, job, warning: 'No DB configured; in-memory update only.' });
   }
+});
+
+// HR API: (re)send job announcement to candidates
+// Body: { mode: 'all' | 'new' }
+app.post('/api/jobs/:jobId/send', async (req, res) => {
+  const jobId = req.params.jobId;
+  const mode = (req.body && req.body.mode) || 'new';
+  if (!dbReady) return res.status(400).json({ error: 'DB required for send workflow' });
+  const job = await Job.findOne({ jobId });
+  if (!job) return res.status(404).json({ error: 'Not found' });
+  const all = Array.isArray(job.candidateRecipients) ? job.candidateRecipients.map(String) : [];
+  const sentSet = new Set((job.sentRecipients || []).map(s => s.trim()));
+  const targets = mode === 'all' ? all : all.filter(p => !sentSet.has(p.trim()));
+  const msg = buildWelcomeMessage(job);
+  let success = 0;
+  for (const r of targets) {
+    const to = toWhatsApp(r);
+    if (!to) continue;
+    const result = await sendWhatsApp(to, msg);
+    if (result) success++;
+  }
+  // Update flags regardless of per-message success to avoid hammering blocks; can be refined if needed
+  const union = Array.from(new Set([...(job.sentRecipients || []), ...targets]));
+  job.sentRecipients = union;
+  await job.save();
+  return res.json({ ok: true, sent: targets.length, success });
 });
 
 // HR API: job submissions
@@ -591,7 +647,7 @@ app.get('/api/submissions/:id', async (req, res) => {
 });
 
 // Health
-app.get('/health', (_, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.status(200).send('OK'));
 
 // Public app config for UI branding
 function resolveBrandIcon() {
@@ -626,7 +682,7 @@ app.get(['/','/admin'], (_, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] Running on port ${PORT}`);
 });
