@@ -613,7 +613,7 @@ app.get(['/','/admin'], (_, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
