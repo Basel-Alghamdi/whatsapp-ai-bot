@@ -235,6 +235,7 @@ async function converseOnAnswer({ job, sessionDoc, question, message }) {
       return { action:'ask_again', assistant_reply: '', normalized_answer: null };
     }
     console.log(`[LLM] converse using OpenAI ${OPENAI_MODEL}`);
+    console.log('[LLM] Calling OpenAI with model:', process.env.OPENAI_MODEL);
     const resp = await axios.post('https://api.openai.com/v1/chat/completions',
       { model: OPENAI_MODEL, messages, temperature: 0.3 },
       { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
@@ -247,6 +248,7 @@ async function converseOnAnswer({ job, sessionDoc, question, message }) {
       action: String(parsed.action || 'ask_again')
     };
   } catch (e) {
+    console.error('[LLM Error]', e?.response?.data || e?.message || e);
     return { action:'ask_again', assistant_reply: '', normalized_answer: null };
   }
 }
@@ -275,6 +277,7 @@ async function analyzeCandidate(job, answers) {
       throw new Error('OpenAI key missing');
     }
     console.log(`[LLM] analyze using OpenAI ${OPENAI_MODEL}`);
+    console.log('[LLM] Calling OpenAI with model:', process.env.OPENAI_MODEL);
     const resp = await axios.post('https://api.openai.com/v1/chat/completions',
       { model: OPENAI_MODEL, messages: [sys, user], temperature: 0.2 },
       { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }
@@ -306,7 +309,7 @@ async function analyzeCandidate(job, answers) {
       summary: String(parsed.summary || '')
     };
   } catch (err) {
-    console.error('Groq error:', err?.response?.data || err.message);
+    console.error('[LLM Error]', err?.response?.data || err?.message || err);
     return { score: 0, strengths: [], weaknesses: [], decision: 'review', summary: 'AI analysis failed; manual review required.' };
   }
 }
