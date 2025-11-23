@@ -112,6 +112,8 @@ const SessionSchema = new mongoose.Schema(
 const SubmissionSchema = new mongoose.Schema(
   {
     applicantPhone: { type: String, index: true },
+    // Optional: for web-channel identification (dev only)
+    applicantEmail: { type: String, index: true },
     jobId: { type: String, index: true },
     answers: [{ question: String, answer: String }],
     aiScore: { type: Number, default: 0 },
@@ -317,6 +319,7 @@ async function finalizeAndNotify(job, sessionDoc) {
   if (dbReady) {
     submission = await Submission.create({
       applicantPhone: sessionDoc.from || sessionDoc.applicantPhone,
+      applicantEmail: sessionDoc.applicantEmail || undefined,
       jobId: job.jobId || job.id,
       answers: (sessionDoc.answers || []).map(a => ({ question: a.question, answer: a.answer })),
       aiScore: Number(analysis.score || 0),
@@ -674,12 +677,225 @@ app.get('/__app_config.json', (_, res) => {
   });
 });
 
+// =========================
+// Dev: Web Interview (local)
+// =========================
+// POST /api/interview/start
+// Body: { email: string, jobId?: string }
+// Behavior: if email === 'baseelaziz1@gmail.com' -> create a session and return a URL; else no-op
+app.post('/api/interview/start', async (req, res) => {
+  try {
+    const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+    const jobId = req.body && req.body.jobId ? String(req.body.jobId).trim() : null;
+    // Only allow the specific dev email
+    if (email !== 'baseelaziz1@gmail.com') {
+      return res.json({ ok: false, ignored: true });
+    }
+
+    // Resolve job
+    let job = null;
+    if (dbReady) {
+      job = jobId
+        ? await Job.findOne({ jobId }).lean()
+        : await Job.findOne({}).sort({ createdAt: -1 }).lean();
+    }
+    if (!job) {
+      const [single] = fallbackJobs.values();
+      if (!single) return res.status(400).json({ error: 'No active job configured' });
+      job = single;
+    }
+
+    // Create a new session (same structure as WhatsApp flow)
+    let sessionDoc = null;
+    if (dbReady) {
+      sessionDoc = await Session.create({
+        applicantPhone: `email:${email}`,
+        applicantEmail: email,
+        jobId: job.jobId,
+        currentIndex: 0,
+        answers: [],
+        processedMessageSids: [],
+        interviewStarted: false,
+        pendingQuestion: (job.questions || [])[0] || '',
+        conversationHistory: [
+          { role: 'assistant', content: buildWelcomeMessage(job) }
+        ]
+      });
+    } else {
+      // No DB mode: cannot persist sessions -> return mock URL with a random id
+      const fakeId = Math.random().toString(36).slice(2);
+      return res.json({ ok: true, url: `/interview/${fakeId}`, warning: 'DB not configured; session is not persisted.' });
+    }
+
+    return res.json({ ok: true, url: `/interview/${sessionDoc._id}` });
+  } catch (e) {
+    console.error('web interview start error', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// GET /api/interview/session/:id -> loads session + job + history
+app.get('/api/interview/session/:id', async (req, res) => {
+  if (!dbReady) return res.status(400).json({ error: 'DB required for web interview' });
+  const id = req.params.id;
+  const sessionDoc = await Session.findById(id).lean();
+  if (!sessionDoc) return res.status(404).json({ error: 'Not found' });
+  const job = await Job.findOne({ jobId: sessionDoc.jobId }).lean();
+  return res.json({
+    ok: true,
+    session: {
+      id: String(sessionDoc._id),
+      jobId: sessionDoc.jobId,
+      currentIndex: sessionDoc.currentIndex || 0,
+      interviewStarted: !!sessionDoc.interviewStarted,
+      completedAt: sessionDoc.completedAt || null,
+    },
+    job: { jobId: job?.jobId, title: job?.title, language: job?.language, total: (job?.questions || []).length },
+    history: Array.isArray(sessionDoc.conversationHistory) ? sessionDoc.conversationHistory : []
+  });
+});
+
+// POST /api/interview/webhook
+// Body: { sessionId: string, message: string }
+// Reuses WhatsApp flow logic, returns assistant reply as JSON
+app.post('/api/interview/webhook', async (req, res) => {
+  try {
+    if (!dbReady) return res.status(400).json({ error: 'DB required for web interview' });
+    const sessionId = String((req.body && req.body.sessionId) || '').trim();
+    const message = String((req.body && req.body.message) || '').trim();
+    if (!sessionId || !message) return res.status(400).json({ error: 'sessionId and message are required' });
+
+    const sessionDoc = await Session.findById(sessionId);
+    if (!sessionDoc) return res.status(404).json({ error: 'Session not found' });
+    const job = await Job.findOne({ jobId: sessionDoc.jobId }).lean();
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    // Maintain conversation history
+    sessionDoc.conversationHistory = Array.isArray(sessionDoc.conversationHistory) ? sessionDoc.conversationHistory : [];
+    sessionDoc.conversationHistory.push({ role: 'user', content: message });
+
+    const normalizedMsg = message.normalize('NFKC').toLowerCase();
+    const isStart = isStartMessage(job, normalizedMsg);
+
+    // If session not started yet
+    if (!sessionDoc.interviewStarted) {
+      if (!isStart) {
+        const welcome = buildWelcomeMessage(job);
+        sessionDoc.conversationHistory.push({ role: 'assistant', content: welcome });
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+        return res.json({ ok: true, reply: welcome, state: { currentIndex: sessionDoc.currentIndex, started: false } });
+      }
+      sessionDoc.interviewStarted = true;
+      // Ask first question
+      const q = (job.questions || [])[0];
+      const prompt = q ? t((job.language || 'en'), 'whatsapp.question_prefix', { current: 1, total: (job.questions || []).length, question: q }) : t((job.language || 'en'), 'whatsapp.no_questions');
+      sessionDoc.conversationHistory.push({ role: 'assistant', content: prompt });
+      await sessionDoc.save();
+      return res.json({ ok: true, reply: prompt, state: { currentIndex: 0, started: true } });
+    }
+
+    // Conversational handling for current question
+    const idx = sessionDoc.currentIndex || 0;
+    if (idx < (job.questions || []).length) {
+      const q = job.questions[idx];
+
+      // Clarification intent shortcut
+      if (isClarification(message)) {
+        const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+        const reply = guidance?.assistant_reply || '';
+        if (reply) sessionDoc.conversationHistory.push({ role: 'assistant', content: reply });
+        // Re-ask once
+        const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+        sessionDoc.conversationHistory.push({ role: 'assistant', content: reask });
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+        return res.json({ ok: true, reply: reply || reask, state: { currentIndex: idx, started: true } });
+      }
+
+      // User asks question → guide politely
+      if (isUserQuestion(message) && !isProbablyAnswer(message)) {
+        const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+        const reply = guidance?.assistant_reply || '';
+        if (reply) sessionDoc.conversationHistory.push({ role: 'assistant', content: reply });
+        const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+        sessionDoc.conversationHistory.push({ role: 'assistant', content: reask });
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+        return res.json({ ok: true, reply: reply || reask, state: { currentIndex: idx, started: true } });
+      }
+
+      // Default: use model to decide
+      const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
+      const action = guidance?.action || 'ask_again';
+      const reply = guidance?.assistant_reply || '';
+      if (action === 'answer') {
+        const ans = guidance?.normalized_answer ?? message;
+        sessionDoc.answers = sessionDoc.answers || [];
+        if (sessionDoc.answers.length > idx) {
+          sessionDoc.answers[idx] = { question: q, answer: ans };
+        } else if (sessionDoc.answers.length === idx) {
+          sessionDoc.answers.push({ question: q, answer: ans });
+        } else {
+          while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+          sessionDoc.answers.push({ question: q, answer: ans });
+        }
+        sessionDoc.currentIndex = idx + 1;
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+      } else {
+        if (reply) sessionDoc.conversationHistory.push({ role: 'assistant', content: reply });
+        if (action === 'clarify') {
+          const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+          sessionDoc.conversationHistory.push({ role: 'assistant', content: reask });
+        }
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+        return res.json({ ok: true, reply: reply, state: { currentIndex: idx, started: true } });
+      }
+    }
+
+    // Ask next or finalize
+    if (sessionDoc.currentIndex < (job.questions || []).length) {
+      const nextIdx = sessionDoc.currentIndex;
+      const prompt = t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] });
+      sessionDoc.conversationHistory.push({ role: 'assistant', content: prompt });
+      sessionDoc.markModified('conversationHistory');
+      await sessionDoc.save();
+      return res.json({ ok: true, reply: prompt, state: { currentIndex: nextIdx, started: true } });
+    }
+
+    // Finalize
+    if (!sessionDoc.completedAt) {
+      sessionDoc.completedAt = new Date();
+      await sessionDoc.save();
+      const { analysis } = await finalizeAndNotify(job, { ...sessionDoc.toObject(), from: sessionDoc.applicantEmail || sessionDoc.applicantPhone });
+      const finalMsg = buildFinalMessage(job);
+      sessionDoc.conversationHistory.push({ role: 'assistant', content: finalMsg });
+      sessionDoc.markModified('conversationHistory');
+      await sessionDoc.save();
+      return res.json({ ok: true, reply: finalMsg, done: true, analysis });
+    }
+
+    // Already completed
+    return res.json({ ok: true, reply: buildFinalMessage(job), done: true });
+  } catch (e) {
+    console.error('web interview webhook error', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
 // Serve lightweight React Admin (via CDN)
 app.use(express.static('public'));
 // Serve locales for Admin UI i18n
 app.use('/locales', express.static('locales'));
 app.get(['/','/admin'], (_, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin.html'));
+});
+
+// Serve web interview page
+app.get('/interview/:id', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'interview.html'));
 });
 
 const PORT = process.env.PORT || 8080;

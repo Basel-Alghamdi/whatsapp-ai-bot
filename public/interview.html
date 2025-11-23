@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Azzam • Interview</title>
+    <style>
+      :root{
+        --bg:#0f241c; --surface:#122920; --stroke:#1c4d3b; --text:#f0faf5; --muted:#a3beaf; --brand:#22c55e;
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif}
+      .wrap{max-width:800px; margin:0 auto; display:flex; flex-direction:column; height:100%}
+      .header{position:sticky; top:0; background:rgba(10,24,18,.9); border-bottom:1px solid var(--stroke); padding:12px 16px; display:flex; align-items:center; gap:10px}
+      .logo{width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg, var(--brand), #34d399)}
+      .title{font-weight:700}
+      .chat{flex:1; overflow:auto; padding:16px}
+      .msg{max-width:70%; padding:10px 12px; border:1px solid var(--stroke); border-radius:12px; margin:6px 0; white-space:pre-wrap}
+      .me{margin-left:auto; background:rgba(255,255,255,.04)}
+      .bot{margin-right:auto; background:rgba(34,197,94,.08)}
+      .composer{display:flex; gap:8px; padding:12px; border-top:1px solid var(--stroke); background:rgba(10,24,18,.9)}
+      input[type=text]{flex:1; appearance:none; background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--stroke); border-radius:10px; padding:10px}
+      button{appearance:none; border:1px solid transparent; background:linear-gradient(135deg, var(--brand), #34d399); color:#fff; font-weight:600; border-radius:10px; padding:10px 12px; cursor:pointer}
+      .muted{color:var(--muted); font-size:13px}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <div class="logo"></div>
+        <div>
+          <div class="title">Azzam • Interview</div>
+          <div id="jobMeta" class="muted"></div>
+        </div>
+      </div>
+      <div id="chat" class="chat"></div>
+      <div class="composer">
+        <input id="input" type="text" placeholder="Type your message..." />
+        <button id="send">Send</button>
+      </div>
+    </div>
+
+    <script>
+      const chatEl = document.getElementById('chat');
+      const inputEl = document.getElementById('input');
+      const sendBtn = document.getElementById('send');
+      const sessionId = location.pathname.split('/').pop();
+      let busy = false;
+
+      function append(role, content){
+        const div = document.createElement('div');
+        div.className = 'msg ' + (role==='user'?'me':'bot');
+        div.textContent = content;
+        chatEl.appendChild(div);
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      async function load(){
+        try{
+          const r = await fetch(`/api/interview/session/${encodeURIComponent(sessionId)}`);
+          const data = await r.json();
+          if (!data.ok) throw new Error('not ok');
+          const meta = `${data.job?.title || ''} • ${(data.job?.language||'en').toUpperCase()} • ${data.job?.total||0} questions`;
+          document.getElementById('jobMeta').textContent = meta;
+          (data.history||[]).forEach(h => append(h.role, h.content));
+        } catch(e){
+          append('assistant', 'Session not found or expired.');
+          sendBtn.disabled = true; inputEl.disabled = true;
+        }
+      }
+
+      async function send(){
+        if (busy) return;
+        const text = (inputEl.value||'').trim();
+        if (!text) return;
+        busy = true; inputEl.value='';
+        append('user', text);
+        try{
+          const r = await fetch('/api/interview/webhook', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId, message: text }) });
+          const data = await r.json();
+          if (data && data.reply) append('assistant', data.reply);
+          if (data && data.done) {
+            inputEl.disabled = true; sendBtn.disabled = true;
+          }
+        } catch(e){ append('assistant','Something went wrong.'); }
+        finally { busy = false; }
+      }
+
+      sendBtn.onclick = send;
+      inputEl.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter') send(); });
+      load();
+    </script>
+  </body>
+  </html>
+
