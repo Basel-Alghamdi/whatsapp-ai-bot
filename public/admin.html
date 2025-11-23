@@ -310,6 +310,7 @@
         const [questions, setQuestions] = useState(job.questions||['']);
         const [recipients, setRecipients] = useState(job.candidateRecipients||['']);
         const [busy, setBusy] = useState(false);
+        const [devEmail, setDevEmail] = useState('baseelaziz1@gmail.com');
         const save = async () => {
           setBusy(true);
           const res = await fetch(`/api/jobs/${job.jobId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, responsibilities, requirements, skills, benefits, questions, recipients }) });
@@ -318,6 +319,19 @@
           const data = await res.json();
           onSaved && onSaved(data.job);
           alert(t('admin.saved'));
+        };
+        const startWebInterview = async () => {
+          try{
+            const r = await fetch('/api/interview/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: devEmail, jobId: job.jobId }) });
+            const data = await r.json();
+            if (data && data.ok && data.url) {
+              window.open(data.url, '_blank');
+            } else if (data && data.ignored) {
+              alert('Email not allowed in dev mode. Use baseelaziz1@gmail.com');
+            } else {
+              alert('Failed to start web interview.');
+            }
+          } catch(e){ alert('Failed to start web interview.'); }
         };
         return e('div', { className:'grid', style:{gridTemplateColumns:'repeat(12, 1fr)'} }, [
           e('div', { className:'col', style:{gridColumn:'span 6'} }, [
@@ -332,6 +346,18 @@
             TextArea({label:t('admin.benefits'), value:benefits, set:setBenefits, rows:4}),
             DynamicList({label:t('admin.questions'), items:questions, setItems:setQuestions, placeholder:'Type a question...'}),
             DynamicList({label:t('admin.candidates'), items:recipients, setItems:setRecipients, placeholder:'+9665...'})
+          ]),
+          e('div', { className:'col', style:{gridColumn:'span 12'} }, [
+            e('div', { className:'card', style:{marginTop:12} }, [
+              e('h3', { className:'title' }, 'Development: Web Interview (local)'),
+              e('p', { className:'muted' }, 'Only for the exact email baseelaziz1@gmail.com. No emails sent.'),
+              e('div', { className:'rows' }, [
+                TextInput({ label:'Candidate Email (dev only)', value:devEmail, set:setDevEmail, placeholder:'baseelaziz1@gmail.com' })
+              ]),
+              e('div', { className:'inline-actions', style:{marginTop:8} }, [
+                e('button', { className:'btn primary', onClick:startWebInterview }, 'Open Web Interview')
+              ])
+            ])
           ]),
           e('div', { className:'col', style:{gridColumn:'span 12'} }, [
             e('div', { className:'inline-actions', style:{marginTop:12} }, [
