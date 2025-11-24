@@ -15,7 +15,7 @@ const client = require('twilio')(accountSid, authToken);
 // OpenAI (primary) and Groq (fallback)
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // Default to a Chat Completions-compatible model
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
