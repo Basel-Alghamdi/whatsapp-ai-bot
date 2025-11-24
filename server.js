@@ -267,7 +267,7 @@ function isUserQuestion(message) {
 function isProbablyAnswer(message) {
   const m = String(message || '').normalize('NFKC').trim();
   if (!m) return false;
-  if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m) || isMetaNonAnswer(m)) return false;
+  if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m)) return false;
   return true;
 }
 
@@ -336,13 +336,10 @@ function isSubstantiveAnswer(message) {
   if (!m) return false;
   if (isConfirmationOnly(m)) return false;
   if (isClarification(m) || isUserQuestion(m)) return false;
-  if (isMetaNonAnswer(m)) return false;
-  // Softer heuristic: accept if moderate length OR multi-word OR rich punctuation/digits
+  // Relaxed: accept if moderate length OR multi-word OR punctuation/digits
   if (m.length >= 6) return true;
   if (/\s/.test(m)) return true;
-  // Or contains punctuation suggesting explanation or list
   if (/[،,.؛\-•]/.test(m)) return true;
-  // Or contains digits (years, levels, versions)
   if (/\d/.test(m)) return true;
   return false;
 }
@@ -352,8 +349,9 @@ function isValidAnswerContent(message) {
   if (!m) return false;
   if (isConfirmationOnly(m)) return false;
   if (isClarification(m) || isUserQuestion(m)) return false;
-  if (isMetaNonAnswer(m)) return false;
-  return isSubstantiveAnswer(m);
+  // Relaxed: allow small meta phrases; only reject ultra-short tokens
+  if (m.length < 4) return false;
+  return true;
 }
 
 // Guardrails: prevent coaching/content-writing phrasing
@@ -423,7 +421,7 @@ async function analyzeCandidate(job, answers) {
   // Align answers by index; sanitize meta/non-answers to empty strings
   const qa = questions.map((q, i) => {
     const a = (answers || [])[i]?.answer || '';
-    const ans = isValidAnswerContent(a) ? a : '';
+    const ans = isMetaNonAnswer(a) ? '' : String(a || '');
     return { question: q, answer: ans };
   });
   const sys = {
@@ -590,6 +588,32 @@ app.post('/webhook', async (req, res) => {
       await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: 1, total: job.questions.length, question: q }));
       return res.send('OK');
     }
+    // Last question fast-path: if substantive content, finalize immediately; otherwise re-ask and stop
+    if (isLast) {
+      if (isValidAnswerContent(message)) {
+        sessionDoc.answers = sessionDoc.answers || [];
+        if (sessionDoc.answers.length === idx) {
+          sessionDoc.answers.push({ question: q, answer: message });
+        } else if (sessionDoc.answers.length < idx) {
+          while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+          sessionDoc.answers.push({ question: q, answer: message });
+        }
+        sessionDoc.currentIndex = idx + 1;
+        sessionDoc.completedAt = new Date();
+        sessionDoc.stage = 'finished';
+        let feedback = '';
+        try { const g = await converseOnAnswer({ job, sessionDoc, question: q, message }); feedback = sanitizeAssistantReply(g?.assistant_reply || '', job.language); } catch {}
+        const out = [feedback, buildFinalMessage(job)].filter(Boolean).join('\n');
+        if (dbReady) { try { await sessionDoc.save(); } catch(_){} }
+        try { await finalizeAndNotify(job, sessionDoc); } catch(_){}
+        if (out) await sendWhatsApp(fromWa, out);
+        return res.send('OK');
+      } else {
+        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+        if (dbReady) { try { sessionDoc.stage = 'awaiting_answer'; await sessionDoc.save(); } catch(_){} }
+        return res.send('OK');
+      }
+    }
     // Confirmation-only while waiting → ignore to avoid blocking or repetition
     if (isConfirmationOnly(message)) {
       if (dbReady) await sessionDoc.save();
@@ -623,32 +647,6 @@ app.post('/webhook', async (req, res) => {
       if (dbReady) await sessionDoc.save();
       return res.send('OK');
     }
-    // If last question: accept only valid answer; finalize immediately; no follow-ups
-    if (isLast) {
-      if (!isValidAnswerContent(message)) {
-        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
-        if (dbReady) { try { sessionDoc.stage = 'awaiting_answer'; await sessionDoc.save(); } catch(_){} }
-        return res.send('OK');
-      }
-      sessionDoc.answers = sessionDoc.answers || [];
-      if (sessionDoc.answers.length === idx) {
-        sessionDoc.answers.push({ question: q, answer: message });
-      } else if (sessionDoc.answers.length < idx) {
-        while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
-        sessionDoc.answers.push({ question: q, answer: message });
-      }
-      sessionDoc.currentIndex = idx + 1;
-      sessionDoc.completedAt = new Date();
-      sessionDoc.stage = 'finished';
-      let feedback = '';
-      try { const g = await converseOnAnswer({ job, sessionDoc, question: q, message }); feedback = sanitizeAssistantReply(g?.assistant_reply || '', job.language); } catch {}
-      const out = [feedback, buildFinalMessage(job)].filter(Boolean).join('\n');
-      if (dbReady) { try { await sessionDoc.save(); } catch(_){} }
-      try { await finalizeAndNotify(job, sessionDoc); } catch(_){}
-      if (out) await sendWhatsApp(fromWa, out);
-      return res.send('OK');
-    }
-
     // Default: use model to decide for non-last
     const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
     const action = guidance?.action || 'ask_again';
@@ -1108,6 +1106,37 @@ app.post('/api/interview/webhook', async (req, res) => {
     if (idx < (job.questions || []).length) {
       const q = job.questions[idx];
       const isLast = idx === (job.questions || []).length - 1;
+
+      // Last question fast-path: finalize immediately on substantive content
+      if (isLast) {
+        if (isValidAnswerContent(message)) {
+          sessionDoc.answers = sessionDoc.answers || [];
+          if (sessionDoc.answers.length === idx) {
+            sessionDoc.answers.push({ question: q, answer: message });
+          } else if (sessionDoc.answers.length < idx) {
+            while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+            sessionDoc.answers.push({ question: q, answer: message });
+          }
+          sessionDoc.currentIndex = idx + 1;
+          sessionDoc.completedAt = new Date();
+          sessionDoc.stage = 'finished';
+          let feedback = '';
+          try { const g = await converseOnAnswer({ job, sessionDoc, question: q, message }); feedback = sanitizeAssistantReply(g?.assistant_reply || '', job.language); } catch {}
+          const finalMsg = buildFinalMessage(job);
+          const out = [feedback, finalMsg].filter(Boolean).join('\n');
+          sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
+          sessionDoc.markModified('conversationHistory');
+          await sessionDoc.save();
+          const { analysis } = await finalizeAndNotify(job, { ...sessionDoc.toObject(), from: sessionDoc.applicantEmail || sessionDoc.applicantPhone });
+          return res.json({ ok: true, reply: out, done: true, analysis });
+        } else {
+          const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+          sessionDoc.conversationHistory.push({ role: 'assistant', content: reask });
+          sessionDoc.markModified('conversationHistory');
+          await sessionDoc.save();
+          return res.json({ ok: true, reply: reask, state: { currentIndex: idx, started: true } });
+        }
+      }
 
       // Confirmation-only while waiting → ignore so it doesn't block or repeat
       if (isConfirmationOnly(message)) {
