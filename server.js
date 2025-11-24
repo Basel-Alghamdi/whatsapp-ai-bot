@@ -204,28 +204,30 @@ function buildFinalMessage(job) {
 }
 
 function isStartMessage(job, message) {
-  const m = (message || '').trim().toLowerCase();
-  // Arabic variants and common typos
-  const arReady = /(جاهز|حاهز|يلا|يلا\s*نبدأ|تمام|اوكي|أوكي|اوكي\s*نبدأ|خلنا\s*نبدأ|خلّنا\s*نبدأ|لنبدأ|نبدأ|ابدا|ابدأ|بدا|بدأ|انطلق|نعم\s*ابدأ|تمام\s*نبدأ)/;
-  // English readiness and casual phrases
-  const enReady = /(ready|let\s*'?s\s*start|lets\s*start|okay\s*let'?s\s*begin|ok\s*begin|ok\s*start|begin|start|go\s*ahead|let'?s\s*go|sounds\s*good)/;
-  return ((job.language||'en')==='ar') ? arReady.test(m) : (arReady.test(m) || enReady.test(m));
+  // Normalize to handle Arabic punctuation and curly apostrophes
+  const m = String(message || '').normalize('NFKC').trim().toLowerCase();
+  // Arabic variants (include feminine/plural + common typos)
+  const arReady = /(جاهز|جاهزه|جاهزة|جاهزين|حاهز|يلا|يلا\s*نبدأ|يلا\s*نکمل|يلا\s*نكمل|تمام|اوكي|أوكي|اوكيه|اوكي\s*نبدأ|تمام\s*نبدأ|خلنا\s*نبدأ|خلّنا\s*نبدأ|لنبدأ|نبدأ|نبدأ؟|ابدا|ابدأ|بدا|بدأ|انطلق|خلاص\s*نبدأ|تمام\s*نكمل|نكمّل|نكمل)/;
+  // English readiness and casual phrases (always accepted regardless of job language)
+  const enReady = /(ready|let\s*'?s\s*start|lets\s*start|okay\s*let'?s\s*begin|ok\s*begin|ok\s*start|begin|start\b|go\s*ahead|let'?s\s*go|sounds\s*good|we\s*can\s*start|proceed|continue)/;
+  // Always test both Arabic and English readiness regardless of job.language
+  return arReady.test(m) || enReady.test(m);
 }
 
 function isClarification(message) {
-  const m = (message || '').trim().toLowerCase();
+  const m = String(message || '').normalize('NFKC').trim().toLowerCase();
   return /(ما\s*فهمت|وضح|توضيح|اشرح|شرح|explain|what\s+do\s+you\s+mean|i\s+don'?t\s+understand|not\s+understand)/.test(m);
 }
 
 function isUserQuestion(message) {
-  const m = (message || '').trim();
+  const m = String(message || '').normalize('NFKC').trim();
   if (m.endsWith('?')) return true;
   const lower = m.toLowerCase();
   return /\b(what|why|how|when|where|which|who)\b/.test(lower) || /(كيف|لماذا|متى|أين|اين|كم)/.test(lower);
 }
 
 function isProbablyAnswer(message) {
-  const m = (message || '').trim();
+  const m = String(message || '').normalize('NFKC').trim();
   if (!m) return false;
   if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m)) return false;
   return true;
@@ -233,7 +235,7 @@ function isProbablyAnswer(message) {
 
 // Short confirmations that shouldn't be treated as full answers
 function isConfirmationOnly(message) {
-  const m = (message || '').trim().toLowerCase();
+  const m = String(message || '').normalize('NFKC').trim().toLowerCase();
   if (!m) return false;
   // One- or two-word confirmations common in Arabic/English
   const patterns = [
@@ -246,24 +248,33 @@ function isConfirmationOnly(message) {
     /^يلا$/,
     /^يلا\s*نبدأ$/,
     /^جاهز$/,
+    /^جاهزه$/,
+    /^جاهزة$/,
     /^حاضر$/,
     /^تمام\s*تمام$/,
     /^go\s*ahead$/,
     /^ok(ay)?$/,
     /^(sounds|looks)\s*good$/,
-    /^let'?s\s*go$/
+    /^let'?s\s*go$/,
+    /^نبدأ؟$/,
+    /^نكمل$/,
+    /^تمام\s*نكمل$/,
+    /^يلا\s*نكمل$/,
+    /^continue$/,
+    /^proceed$/
   ];
   return patterns.some((re) => re.test(m));
 }
 
 // Heuristic for whether the message has substantive content to count as an answer
 function isSubstantiveAnswer(message) {
-  const m = (message || '').trim();
+  const m = String(message || '').normalize('NFKC').trim();
   if (!m) return false;
   if (isConfirmationOnly(m)) return false;
   if (isClarification(m) || isUserQuestion(m)) return false;
-  // Consider substantive if more than ~8 characters and contains a space (more than one word)
-  if (m.length >= 8 && /\s/.test(m)) return true;
+  // Softer heuristic: accept if moderate length OR multi-word OR rich punctuation/digits
+  if (m.length >= 6) return true;
+  if (/\s/.test(m)) return true;
   // Or contains punctuation suggesting explanation or list
   if (/[،,.؛\-•]/.test(m)) return true;
   // Or contains digits (years, levels, versions)
@@ -477,30 +488,9 @@ app.post('/webhook', async (req, res) => {
       await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: 1, total: job.questions.length, question: q }));
       return res.send('OK');
     }
-    // If user sends a confirmation-only message while expecting an answer → nudge and stay
+    // Confirmation-only while waiting → ignore to avoid blocking or repetition
     if (isConfirmationOnly(message)) {
-      const nudge = (job.language||'en')==='ar'
-        ? `حلو، نكمل على نفس السؤال، احكي لي بتفصيل أكثر عن: ${q}`
-        : `Great. Let’s stick to the same question — tell me a bit more about: ${q}`;
-      // Track follow-up count
-      sessionDoc.followUpCounts = Array.isArray(sessionDoc.followUpCounts) ? sessionDoc.followUpCounts : [];
-      sessionDoc.followUpCounts[idx] = (sessionDoc.followUpCounts[idx] || 0) + 1;
-      const reachedLimit = sessionDoc.followUpCounts[idx] >= MAX_FOLLOW_UPS;
       if (dbReady) await sessionDoc.save();
-      if (reachedLimit) {
-        // Mark as needs review and advance
-        sessionDoc.needsReview = Array.isArray(sessionDoc.needsReview) ? sessionDoc.needsReview : [];
-        if (!sessionDoc.needsReview.includes(idx)) sessionDoc.needsReview.push(idx);
-        sessionDoc.currentIndex = idx + 1;
-        if (dbReady) await sessionDoc.save();
-        // Ask next question if exists
-        if (sessionDoc.currentIndex < job.questions.length) {
-          await sendWhatsApp(fromWa, nudge);
-          await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: sessionDoc.currentIndex+1, total: job.questions.length, question: job.questions[sessionDoc.currentIndex] }));
-          return res.send('OK');
-        }
-      }
-      await sendWhatsApp(fromWa, nudge);
       return res.send('OK');
     }
     // Clarification intent shortcut
@@ -548,6 +538,13 @@ app.post('/webhook', async (req, res) => {
       }
       sessionDoc.currentIndex = idx + 1;
       if (dbReady) await sessionDoc.save();
+      // Send feedback then immediately next question
+      if (reply) await sendWhatsApp(fromWa, reply);
+      if (sessionDoc.currentIndex < job.questions.length) {
+        const nextIdx = sessionDoc.currentIndex;
+        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: nextIdx+1, total: job.questions.length, question: job.questions[nextIdx] }));
+      }
+      return res.send('OK');
     } else {
       // If action in ask_again/guide but user message is substantive, treat it as answer and advance
       if ((action === 'ask_again' || action === 'guide') && isSubstantiveAnswer(message)) {
@@ -563,6 +560,13 @@ app.post('/webhook', async (req, res) => {
         }
         sessionDoc.currentIndex = idx + 1;
         if (dbReady) await sessionDoc.save();
+        // Acknowledge briefly then move on
+        if (reply) await sendWhatsApp(fromWa, reply);
+        if (sessionDoc.currentIndex < job.questions.length) {
+          const nextIdx = sessionDoc.currentIndex;
+          await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: nextIdx+1, total: job.questions.length, question: job.questions[nextIdx] }));
+        }
+        return res.send('OK');
       } else {
         // For clarify → re-ask once; for ask_again/guide → only send short follow-up
         const fu = guidance?.follow_up_question ? sanitizeAssistantReply(guidance.follow_up_question, job.language) : '';
@@ -942,23 +946,10 @@ app.post('/api/interview/webhook', async (req, res) => {
     if (idx < (job.questions || []).length) {
       const q = job.questions[idx];
 
-      // Confirmation-only while waiting for answer → nudge and stay
+      // Confirmation-only while waiting → ignore so it doesn't block or repeat
       if (isConfirmationOnly(message)) {
-        const nudge = (job.language||'en')==='ar'
-          ? `حلو، نكمل على نفس السؤال، احكي لي بتفصيل أكثر عن: ${q}`
-          : `Great. Let’s stick to the same question — tell me a bit more about: ${q}`;
-        sessionDoc.followUpCounts = Array.isArray(sessionDoc.followUpCounts) ? sessionDoc.followUpCounts : [];
-        sessionDoc.followUpCounts[idx] = (sessionDoc.followUpCounts[idx] || 0) + 1;
-        const reachedLimit = sessionDoc.followUpCounts[idx] >= MAX_FOLLOW_UPS;
-        if (reachedLimit) {
-          sessionDoc.needsReview = Array.isArray(sessionDoc.needsReview) ? sessionDoc.needsReview : [];
-          if (!sessionDoc.needsReview.includes(idx)) sessionDoc.needsReview.push(idx);
-          sessionDoc.currentIndex = idx + 1;
-        }
-        sessionDoc.conversationHistory.push({ role: 'assistant', content: nudge });
-        sessionDoc.markModified('conversationHistory');
         await sessionDoc.save();
-        return res.json({ ok: true, reply: nudge, state: { currentIndex: sessionDoc.currentIndex, started: true } });
+        return res.json({ ok: true, reply: '', state: { currentIndex: sessionDoc.currentIndex, started: true } });
       }
 
       // Clarification intent shortcut
@@ -1011,8 +1002,16 @@ app.post('/api/interview/webhook', async (req, res) => {
           sessionDoc.answers.push({ question: q, answer: ans });
         }
         sessionDoc.currentIndex = idx + 1;
+        // Send feedback then immediately the next question as a single combined assistant turn
+        const nextIdx = sessionDoc.currentIndex;
+        const prompt = nextIdx < (job.questions || []).length
+          ? t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] })
+          : '';
+        const out = [reply, prompt].filter(Boolean).join('\n');
+        if (out) sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
         sessionDoc.markModified('conversationHistory');
         await sessionDoc.save();
+        return res.json({ ok: true, reply: out, state: { currentIndex: nextIdx, started: true } });
       } else {
         if ((action === 'ask_again' || action === 'guide') && isSubstantiveAnswer(message)) {
           const ans = message;
@@ -1026,8 +1025,16 @@ app.post('/api/interview/webhook', async (req, res) => {
             sessionDoc.answers.push({ question: q, answer: ans });
           }
           sessionDoc.currentIndex = idx + 1;
+          // Acknowledge briefly then move to the next question in the same turn
+          const nextIdx = sessionDoc.currentIndex;
+          const prompt = nextIdx < (job.questions || []).length
+            ? t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] })
+            : '';
+          const out = [reply, prompt].filter(Boolean).join('\n');
+          if (out) sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
           sessionDoc.markModified('conversationHistory');
           await sessionDoc.save();
+          return res.json({ ok: true, reply: out, state: { currentIndex: nextIdx, started: true } });
         } else {
           const fu = guidance?.follow_up_question ? sanitizeAssistantReply(guidance.follow_up_question, job.language) : '';
           const out = [reply, fu].filter(Boolean).join('\n');
