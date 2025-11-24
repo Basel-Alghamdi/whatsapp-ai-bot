@@ -37,6 +37,38 @@ if (OPENAI_API_KEY) {
   console.warn('[Startup] OPENAI_API_KEY not set. LLM calls will not proceed.');
 }
 
+// Global crash diagnostics and graceful shutdown
+process.on('unhandledRejection', (reason, p) => {
+  try {
+    console.error('[UnhandledRejection]', reason);
+  } catch {}
+});
+process.on('uncaughtException', (err) => {
+  try {
+    console.error('[UncaughtException]', err && (err.stack || err.message || err));
+  } catch {}
+});
+process.on('SIGTERM', () => {
+  console.warn('[Shutdown] SIGTERM received');
+  if (global.__server && typeof global.__server.close === 'function') {
+    try { global.__server.close(() => console.log('[Shutdown] HTTP server closed')); } catch {}
+  }
+});
+process.on('SIGINT', () => {
+  console.warn('[Shutdown] SIGINT received');
+  if (global.__server && typeof global.__server.close === 'function') {
+    try { global.__server.close(() => console.log('[Shutdown] HTTP server closed')); } catch {}
+  }
+});
+
+// Optional memory log for debugging (enable with LOG_MEM=1)
+if (process.env.LOG_MEM === '1') {
+  setInterval(() => {
+    const m = process.memoryUsage();
+    console.log(`[Mem] rss=${(m.rss/1048576).toFixed(1)}MB heapUsed=${(m.heapUsed/1048576).toFixed(1)}MB`);
+  }, 60000).unref();
+}
+
 // Load locales for i18n (server-side only for WhatsApp messages)
 const locales = {};
 function loadLocales(){
@@ -1146,6 +1178,16 @@ app.get('/interview/:id', (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] Running on port ${PORT}`);
+});
+// Expose for signal handlers
+global.__server = server;
+// Tune timeouts for proxy compatibility
+try {
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+} catch {}
+server.on('error', (e) => {
+  console.error('[Server Error]', e && (e.stack || e.message || e));
 });
