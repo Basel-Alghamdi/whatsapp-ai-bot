@@ -261,7 +261,7 @@ function isUserQuestion(message) {
 function isProbablyAnswer(message) {
   const m = String(message || '').normalize('NFKC').trim();
   if (!m) return false;
-  if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m)) return false;
+  if (isClarification(m) || isUserQuestion(m) || isStartMessage({language:'en'}, m) || isMetaNonAnswer(m)) return false;
   return true;
 }
 
@@ -298,12 +298,36 @@ function isConfirmationOnly(message) {
   return patterns.some((re) => re.test(m));
 }
 
+// Meta or administrative messages that are not actual answers
+function isMetaNonAnswer(message) {
+  const m = String(message || '').normalize('NFKC').trim().toLowerCase();
+  if (!m) return false;
+  const patterns = [
+    // Arabic meta
+    /(أتوقع|اتوقع|أعتقد|اعتقد)\s+.*(جاوبت|أجبت)\s+(كل|كافة)\s+(الأسئلة|الاسئلة|اسئلة)/,
+    /(جاوبت|أجبت)\s+(كل|كافة)\s+(الأسئلة|الاسئلة|اسئلة)/,
+    /(هل\s*(هناك|في)\s*سؤال\s*(آخر|اخر)\??)/,
+    /(خلصنا|خلاص|انتهينا|انتهيت|ما\s*عندي\s*(شي|شيء|إضافة|اضافة))/,
+    /(هذا\s*كل\s*شي(ء)?)/,
+    /(أظن|اظن)\s+كفاية/,
+    // English meta
+    /i\s*think\s*i('?ve|\s*have)?\s*answered\s*(everything|all)/,
+    /(did\s*i|did\s*we)\s*answer\s*(everything|all)/,
+    /(anything\s*else\??|any\s*other\s*question\??|any\s*other\s*questions\??)/,
+    /(that'?s\s*(all|it))/, 
+    /(we\s*are\s*done|i('?m|\s*am)\s*done)/,
+    /(no\s*further\s*questions)/
+  ];
+  return patterns.some((re) => re.test(m));
+}
+
 // Heuristic for whether the message has substantive content to count as an answer
 function isSubstantiveAnswer(message) {
   const m = String(message || '').normalize('NFKC').trim();
   if (!m) return false;
   if (isConfirmationOnly(m)) return false;
   if (isClarification(m) || isUserQuestion(m)) return false;
+  if (isMetaNonAnswer(m)) return false;
   // Softer heuristic: accept if moderate length OR multi-word OR rich punctuation/digits
   if (m.length >= 6) return true;
   if (/\s/.test(m)) return true;
@@ -312,6 +336,15 @@ function isSubstantiveAnswer(message) {
   // Or contains digits (years, levels, versions)
   if (/\d/.test(m)) return true;
   return false;
+}
+
+function isValidAnswerContent(message) {
+  const m = String(message || '').normalize('NFKC').trim();
+  if (!m) return false;
+  if (isConfirmationOnly(m)) return false;
+  if (isClarification(m) || isUserQuestion(m)) return false;
+  if (isMetaNonAnswer(m)) return false;
+  return isSubstantiveAnswer(m);
 }
 
 // Guardrails: prevent coaching/content-writing phrasing
@@ -327,6 +360,11 @@ function sanitizeAssistantReply(text, lang) {
     /يمكنني صياغة الإجابة/gi,
     /أستطيع كتابة إجابة/gi,
     /خليني أصيغ لك/gi,
+    // Avoid meta prompts that derail flow
+    /هل\s*هناك\s*سؤال\s*آخر\??/gi,
+    /any\s*other\s*question\??/gi,
+    /any\s*other\s*questions\??/gi,
+    /anything\s*else\??/gi,
   ];
   badPhrases.forEach((re) => {
     out = out.replace(re, '');
@@ -372,19 +410,25 @@ async function converseOnAnswer({ job, sessionDoc, question, message }) {
 // (legacy helpers removed)
 
 async function analyzeCandidate(job, answers) {
-  const qa = answers.map(a => ({ question: a.question, answer: a.answer }));
+  const questions = Array.isArray(job.questions) ? job.questions : [];
+  // Align answers by index; sanitize meta/non-answers to empty strings
+  const qa = questions.map((q, i) => {
+    const a = (answers || [])[i]?.answer || '';
+    const ans = isValidAnswerContent(a) ? a : '';
+    return { question: q, answer: ans };
+  });
   const sys = {
     role: 'system',
     content: (job.language||'en')==='ar'
-      ? 'أنت مُقابِل تقني متمرس. قيّم المرشح بعدالة وفق معايير واضحة، وأعد JSON صارم فقط. استخدم مقياس 0–100 حيث 100 ممتاز. عاير الدرجات إنسانيًا: المرشح المتوسط بين 55–85 غالبًا. طبّق محاور التقييم بالأوزان: الوضوح 25%، الملاءمة 35%، الاكتمال 25%، عمق الخبرة 15%. ثم احسب decision وفق العتبات: accept إذا score ≥ 75، review إذا 60–74، reject إذا < 60. لا تُضِف أي نص خارج JSON.'
-      : 'You are a senior technical interviewer. Score fairly with a human-calibrated 0–100 scale (100 = excellent). Typical average candidates should land around 55–85 unless answers are truly poor. Use weighted rubric: clarity 25%, relevance 35%, completeness 25%, experience-depth 15%. Then set decision by thresholds: accept if score ≥ 75; review if 60–74; reject if < 60. Return strict JSON only.'
+      ? 'أنت مُقابِل تقني متمرس. قيّم المرشح بعدالة وفق معايير واضحة، وأعد JSON صارم فقط. استخدم مقياس 0–100 حيث 100 ممتاز. عاير الدرجات إنسانيًا: المرشح المتوسط بين 55–85 غالبًا. طبّق محاور التقييم بالأوزان: الوضوح 25%، الملاءمة 35%، الاكتمال 25%، عمق الخبرة 15%. ثم احسب decision وفق العتبات: accept إذا score ≥ 75، review إذا 60–74، reject إذا < 60. إذا كانت أي إجابة فارغة فاعتبرها غير مُجاب عنها وامِل إلى قرار review. أعد JSON فقط.'
+      : 'You are a senior technical interviewer. Score fairly with a human-calibrated 0–100 scale (100 = excellent). Typical average candidates should land around 55–85 unless answers are truly poor. Use weighted rubric: clarity 25%, relevance 35%, completeness 25%, experience-depth 15%. Then set decision by thresholds: accept if score ≥ 75; review if 60–74; reject if < 60. If any answer is empty treat it as unanswered and lean toward review. Return strict JSON only.'
   };
 
   const user = {
     role: 'user',
     content: (job.language||'en')==='ar'
-      ? `قيّم هذا المرشح بناءً على تفاصيل الوظيفة التالية.\n\nتفاصيل الدور:\nالعنوان: ${job.title}\nالوصف: ${job.description || ''}\nالمسؤوليات: ${job.responsibilities || ''}\nالمتطلبات: ${job.requirements || ''}\nالمهارات: ${job.skills || ''}\nالمزايا: ${job.benefits || ''}\ن\nإجابات المرشح:\n${qa.map((x,i)=>`س${i+1}: ${x.question}\nج${i+1}: ${x.answer}`).join('\n')}\n\nأعد JSON فقط بالشكل:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
-      : `Evaluate this applicant strictly based on the role below.\n\nROLE DETAILS:\nTitle: ${job.title}\nDescription: ${job.description || ''}\nResponsibilities: ${job.responsibilities || ''}\nRequirements: ${job.requirements || ''}\nSkills: ${job.skills || ''}\nBenefits: ${job.benefits || ''}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`Q${i+1}: ${x.question}\nA${i+1}: ${x.answer}`).join('\n')}\n\nReturn strict JSON:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
+      ? `قيّم هذا المرشح بناءً على تفاصيل الدور التالية وإجابات المرشح المقابلة لكل سؤال فقط.\n\nالأسئلة:\n${questions.map((q,i)=>`س${i+1}: ${q}`).join('\n')}\n\nإجابات المرشح (قد تكون فارغة إذا لم يجب):\n${qa.map((x,i)=>`ج${i+1}: ${x.answer}`).join('\n')}\n\nأعد JSON فقط بالشكل:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
+      : `Evaluate strictly based on these Q/A pairs only (answers may be empty if unanswered).\n\nQUESTIONS:\n${questions.map((q,i)=>`Q${i+1}: ${q}`).join('\n')}\n\nAPPLICANT ANSWERS:\n${qa.map((x,i)=>`A${i+1}: ${x.answer}`).join('\n')}\n\nReturn strict JSON:\n{\n  "score": number,\n  "strengths": [],\n  "weaknesses": [],\n  "decision": "accept" | "reject" | "review",\n  "summary": ""\n}`
   };
 
   try {
@@ -417,6 +461,11 @@ async function analyzeCandidate(job, answers) {
     else if (score >= 75) decision = 'recommended';
     else if (score >= 60) decision = 'review';
     else decision = 'weak';
+    // If any answers were empty, lean to review
+    const anyMissing = qa.some(x => !x.answer || !x.answer.trim());
+    if (anyMissing && (decision === 'strong' || decision === 'recommended')) {
+      decision = 'review';
+    }
     return {
       score,
       strengths: Array.isArray(parsed.strengths) ? parsed.strengths : (parsed.strengths ? [String(parsed.strengths)] : []),
@@ -558,17 +607,22 @@ app.post('/webhook', async (req, res) => {
     const action = guidance?.action || 'ask_again';
     let reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
     if (action === 'answer') {
-      // Store the candidate's raw message to preserve original wording
+      // Store the candidate's raw message if it is a valid answer (not meta/confirmation)
       const ans = message;
+      if (!isValidAnswerContent(ans)) {
+        // Treat as non-answer: re-ask full question
+        const reask = t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q });
+        if (reply) await sendWhatsApp(fromWa, reply);
+        await sendWhatsApp(fromWa, reask);
+        return res.send('OK');
+      }
       sessionDoc.answers = sessionDoc.answers || [];
-      if (sessionDoc.answers.length > idx) {
-        sessionDoc.answers[idx] = { question: q, answer: ans };
-      } else if (sessionDoc.answers.length === idx) {
+      if (sessionDoc.answers.length === idx) {
         sessionDoc.answers.push({ question: q, answer: ans });
-      } else {
+      } else if (sessionDoc.answers.length < idx) {
         while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
         sessionDoc.answers.push({ question: q, answer: ans });
-      }
+      } // Do not overwrite if length > idx (answer already finalized)
       const isLast = idx === (job.questions || []).length - 1;
       sessionDoc.currentIndex = idx + 1;
       if (isLast) {
@@ -590,15 +644,13 @@ app.post('/webhook', async (req, res) => {
       }
       return res.send('OK');
     } else {
-      // If action in ask_again/guide but user message is substantive, treat it as answer and advance
-      if ((action === 'ask_again' || action === 'guide') && isSubstantiveAnswer(message)) {
+      // If action in ask_again/guide but user message is a valid answer, treat it as answer and advance
+      if ((action === 'ask_again' || action === 'guide') && isValidAnswerContent(message)) {
         const ans = message;
         sessionDoc.answers = sessionDoc.answers || [];
-        if (sessionDoc.answers.length > idx) {
-          sessionDoc.answers[idx] = { question: q, answer: ans };
-        } else if (sessionDoc.answers.length === idx) {
+        if (sessionDoc.answers.length === idx) {
           sessionDoc.answers.push({ question: q, answer: ans });
-        } else {
+        } else if (sessionDoc.answers.length < idx) {
           while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
           sessionDoc.answers.push({ question: q, answer: ans });
         }
@@ -1045,14 +1097,21 @@ app.post('/api/interview/webhook', async (req, res) => {
       const action = guidance?.action || 'ask_again';
       const reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
       if (action === 'answer') {
-        // Store the candidate's raw message
+        // Store the candidate's raw message only if valid answer (not meta/confirmation)
         const ans = message;
+        if (!isValidAnswerContent(ans)) {
+          // Re-ask full question; do not advance or store
+          const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+          const out = [reply, reask].filter(Boolean).join('\n');
+          if (out) sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
+          sessionDoc.markModified('conversationHistory');
+          await sessionDoc.save();
+          return res.json({ ok: true, reply: out, state: { currentIndex: idx, started: true } });
+        }
         sessionDoc.answers = sessionDoc.answers || [];
-        if (sessionDoc.answers.length > idx) {
-          sessionDoc.answers[idx] = { question: q, answer: ans };
-        } else if (sessionDoc.answers.length === idx) {
+        if (sessionDoc.answers.length === idx) {
           sessionDoc.answers.push({ question: q, answer: ans });
-        } else {
+        } else if (sessionDoc.answers.length < idx) {
           while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
           sessionDoc.answers.push({ question: q, answer: ans });
         }
@@ -1078,12 +1137,10 @@ app.post('/api/interview/webhook', async (req, res) => {
         await sessionDoc.save();
         return res.json({ ok: true, reply: out, state: { currentIndex: nextIdx, started: true } });
       } else {
-        if ((action === 'ask_again' || action === 'guide') && isSubstantiveAnswer(message)) {
+        if ((action === 'ask_again' || action === 'guide') && isValidAnswerContent(message)) {
           const ans = message;
           sessionDoc.answers = sessionDoc.answers || [];
-          if (sessionDoc.answers.length > idx) {
-            sessionDoc.answers[idx] = { question: q, answer: ans };
-          } else if (sessionDoc.answers.length === idx) {
+          if (sessionDoc.answers.length === idx) {
             sessionDoc.answers.push({ question: q, answer: ans });
           } else {
             while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
