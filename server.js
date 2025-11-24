@@ -526,7 +526,8 @@ app.post('/webhook', async (req, res) => {
     const action = guidance?.action || 'ask_again';
     let reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
     if (action === 'answer') {
-      const ans = guidance?.normalized_answer ?? message;
+      // Store the candidate's raw message to preserve original wording
+      const ans = message;
       sessionDoc.answers = sessionDoc.answers || [];
       if (sessionDoc.answers.length > idx) {
         sessionDoc.answers[idx] = { question: q, answer: ans };
@@ -536,7 +537,18 @@ app.post('/webhook', async (req, res) => {
         while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
         sessionDoc.answers.push({ question: q, answer: ans });
       }
+      const isLast = idx === (job.questions || []).length - 1;
       sessionDoc.currentIndex = idx + 1;
+      if (isLast) {
+        // Finalize immediately: send feedback + final closing in one message
+        const finalMsg = buildFinalMessage(job);
+        const out = [reply, finalMsg].filter(Boolean).join('\n');
+        sessionDoc.completedAt = new Date();
+        if (dbReady) await sessionDoc.save();
+        try { await finalizeAndNotify(job, sessionDoc); } catch(_) {}
+        if (out) await sendWhatsApp(fromWa, out);
+        return res.send('OK');
+      }
       if (dbReady) await sessionDoc.save();
       // Send feedback then immediately next question
       if (reply) await sendWhatsApp(fromWa, reply);
@@ -558,7 +570,17 @@ app.post('/webhook', async (req, res) => {
           while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
           sessionDoc.answers.push({ question: q, answer: ans });
         }
+        const isLast = idx === (job.questions || []).length - 1;
         sessionDoc.currentIndex = idx + 1;
+        if (isLast) {
+          const finalMsg = buildFinalMessage(job);
+          const out = [reply, finalMsg].filter(Boolean).join('\n');
+          sessionDoc.completedAt = new Date();
+          if (dbReady) await sessionDoc.save();
+          try { await finalizeAndNotify(job, sessionDoc); } catch(_) {}
+          if (out) await sendWhatsApp(fromWa, out);
+          return res.send('OK');
+        }
         if (dbReady) await sessionDoc.save();
         // Acknowledge briefly then move on
         if (reply) await sendWhatsApp(fromWa, reply);
@@ -991,7 +1013,8 @@ app.post('/api/interview/webhook', async (req, res) => {
       const action = guidance?.action || 'ask_again';
       const reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
       if (action === 'answer') {
-        const ans = guidance?.normalized_answer ?? message;
+        // Store the candidate's raw message
+        const ans = message;
         sessionDoc.answers = sessionDoc.answers || [];
         if (sessionDoc.answers.length > idx) {
           sessionDoc.answers[idx] = { question: q, answer: ans };
@@ -1001,13 +1024,23 @@ app.post('/api/interview/webhook', async (req, res) => {
           while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
           sessionDoc.answers.push({ question: q, answer: ans });
         }
+        const isLast = idx === (job.questions || []).length - 1;
         sessionDoc.currentIndex = idx + 1;
-        // Send feedback then immediately the next question as a single combined assistant turn
+        let out;
+        if (isLast) {
+          const finalMsg = buildFinalMessage(job);
+          out = [reply, finalMsg].filter(Boolean).join('\n');
+          sessionDoc.completedAt = new Date();
+          sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
+          sessionDoc.markModified('conversationHistory');
+          await sessionDoc.save();
+          const { analysis } = await finalizeAndNotify(job, { ...sessionDoc.toObject(), from: sessionDoc.applicantEmail || sessionDoc.applicantPhone });
+          return res.json({ ok: true, reply: out, done: true, analysis });
+        }
+        // Not last: feedback + next question in one turn
         const nextIdx = sessionDoc.currentIndex;
-        const prompt = nextIdx < (job.questions || []).length
-          ? t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] })
-          : '';
-        const out = [reply, prompt].filter(Boolean).join('\n');
+        const prompt = t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] });
+        out = [reply, prompt].filter(Boolean).join('\n');
         if (out) sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
         sessionDoc.markModified('conversationHistory');
         await sessionDoc.save();
@@ -1024,12 +1057,21 @@ app.post('/api/interview/webhook', async (req, res) => {
             while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
             sessionDoc.answers.push({ question: q, answer: ans });
           }
+          const isLast = idx === (job.questions || []).length - 1;
           sessionDoc.currentIndex = idx + 1;
-          // Acknowledge briefly then move to the next question in the same turn
+          if (isLast) {
+            const finalMsg = buildFinalMessage(job);
+            const out = [reply, finalMsg].filter(Boolean).join('\n');
+            sessionDoc.completedAt = new Date();
+            sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
+            sessionDoc.markModified('conversationHistory');
+            await sessionDoc.save();
+            const { analysis } = await finalizeAndNotify(job, { ...sessionDoc.toObject(), from: sessionDoc.applicantEmail || sessionDoc.applicantPhone });
+            return res.json({ ok: true, reply: out, done: true, analysis });
+          }
+          // Not last: ack + next question
           const nextIdx = sessionDoc.currentIndex;
-          const prompt = nextIdx < (job.questions || []).length
-            ? t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] })
-            : '';
+          const prompt = t((job.language || 'en'), 'whatsapp.question_prefix', { current: nextIdx + 1, total: job.questions.length, question: job.questions[nextIdx] });
           const out = [reply, prompt].filter(Boolean).join('\n');
           if (out) sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
           sessionDoc.markModified('conversationHistory');
