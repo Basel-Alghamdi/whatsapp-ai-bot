@@ -140,6 +140,8 @@ const SessionSchema = new mongoose.Schema(
     expectingClarification: { type: Boolean, default: false },
     lastUserAnswer: { type: String, default: '' },
     pendingQuestion: { type: String, default: '' },
+    // Simple stage machine: awaiting_answer | processing | finished
+    stage: { type: String, default: 'awaiting_answer' },
     // New: track follow-ups per question and which need manual review
     followUpCounts: { type: [Number], default: [] },
     needsReview: { type: [Number], default: [] },
@@ -235,6 +237,10 @@ function buildFinalMessage(job) {
   return t((job.language||'en'), 'whatsapp.final');
 }
 
+function buildAlreadyCompletedMessage(job) {
+  return (job.language||'en')==='ar' ? 'تم إنهاء المقابلة بالفعل.' : 'The interview has already been completed.';
+}
+
 function isStartMessage(job, message) {
   // Normalize to handle Arabic punctuation and curly apostrophes
   const m = String(message || '').normalize('NFKC').trim().toLowerCase();
@@ -275,6 +281,9 @@ function isConfirmationOnly(message) {
     /^تمام$/,
     /^او?كي$/,
     /^أوكي$/,
+    /^عفواً?$/,
+    /^عفوًا$/,
+    /^عفو$/,
     /^اوكي\s*نبدأ$/,
     /^تمام\s*نبدأ$/,
     /^يلا$/,
@@ -527,12 +536,20 @@ app.post('/webhook', async (req, res) => {
     job = single;
   }
 
-  // Session
-  let sessionDoc = dbReady ? await Session.findOne({ applicantPhone: from, jobId: job.jobId, completedAt: null }) : null;
+  // Session: fetch latest (even if completed) to enforce post-finish blocking
+  let sessionDoc = null;
+  if (dbReady) {
+    sessionDoc = await Session.findOne({ applicantPhone: from, jobId: job.jobId }).sort({ _id: -1 });
+  }
 
   // Start phrase recognition (based on job.language)
   const normalizedMsg = message.normalize('NFKC').toLowerCase();
   const isStart = isStartMessage(job, normalizedMsg);
+
+  if (sessionDoc && (sessionDoc.stage === 'finished' || sessionDoc.completedAt)) {
+    await sendWhatsApp(fromWa, buildAlreadyCompletedMessage(job));
+    return res.send('OK');
+  }
 
   if (!sessionDoc) {
     // Create session only on readiness; otherwise send intro
@@ -541,7 +558,7 @@ app.post('/webhook', async (req, res) => {
       return res.send('OK');
     }
     if (dbReady) {
-      sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [], interviewStarted: true, pendingQuestion: (job.questions||[])[0] || '', followUpCounts: [], needsReview: [] });
+      sessionDoc = await Session.create({ applicantPhone: from, jobId: job.jobId, currentIndex: 0, answers: [], processedMessageSids: [], interviewStarted: true, stage: 'awaiting_answer', pendingQuestion: (job.questions||[])[0] || '', followUpCounts: [], needsReview: [] });
     }
     // First question
     if ((job.questions||[]).length > 0) {
@@ -558,10 +575,14 @@ app.post('/webhook', async (req, res) => {
     sessionDoc.processedMessageSids.push(messageSid);
   }
 
+  // Mark processing stage (best-effort)
+  if (dbReady) { try { sessionDoc.stage = 'processing'; await sessionDoc.save(); } catch (_) {} }
+
   // Conversational handling for current question
   const idx = sessionDoc.currentIndex || 0;
   if (idx < (job.questions||[]).length) {
     const q = job.questions[idx];
+    const isLast = idx === (job.questions||[]).length - 1;
     // Heuristic classification: readiness starts Q1 if not started
     if (!sessionDoc.interviewStarted && isStartMessage(job, message)) {
       sessionDoc.interviewStarted = true;
@@ -574,8 +595,8 @@ app.post('/webhook', async (req, res) => {
       if (dbReady) await sessionDoc.save();
       return res.send('OK');
     }
-    // Clarification intent shortcut
-    if (isClarification(message)) {
+    // Clarification intent shortcut (skip model on last question)
+    if (!isLast && isClarification(message)) {
       const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
       let reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
       if (reply) await sendWhatsApp(fromWa, reply);
@@ -583,8 +604,8 @@ app.post('/webhook', async (req, res) => {
       await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
       return res.send('OK');
     }
-    // User question → guide politely
-    if (isUserQuestion(message) && !isProbablyAnswer(message)) {
+    // User question → guide politely (skip model on last question)
+    if (!isLast && isUserQuestion(message) && !isProbablyAnswer(message)) {
       const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
       let reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
       const fu = guidance?.follow_up_question ? sanitizeAssistantReply(guidance.follow_up_question, job.language) : '';
@@ -602,7 +623,33 @@ app.post('/webhook', async (req, res) => {
       if (dbReady) await sessionDoc.save();
       return res.send('OK');
     }
-    // Default: use model to decide
+    // If last question: accept only valid answer; finalize immediately; no follow-ups
+    if (isLast) {
+      if (!isValidAnswerContent(message)) {
+        await sendWhatsApp(fromWa, t((job.language||'en'),'whatsapp.question_prefix', { current: idx+1, total: job.questions.length, question: q }));
+        if (dbReady) { try { sessionDoc.stage = 'awaiting_answer'; await sessionDoc.save(); } catch(_){} }
+        return res.send('OK');
+      }
+      sessionDoc.answers = sessionDoc.answers || [];
+      if (sessionDoc.answers.length === idx) {
+        sessionDoc.answers.push({ question: q, answer: message });
+      } else if (sessionDoc.answers.length < idx) {
+        while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+        sessionDoc.answers.push({ question: q, answer: message });
+      }
+      sessionDoc.currentIndex = idx + 1;
+      sessionDoc.completedAt = new Date();
+      sessionDoc.stage = 'finished';
+      let feedback = '';
+      try { const g = await converseOnAnswer({ job, sessionDoc, question: q, message }); feedback = sanitizeAssistantReply(g?.assistant_reply || '', job.language); } catch {}
+      const out = [feedback, buildFinalMessage(job)].filter(Boolean).join('\n');
+      if (dbReady) { try { await sessionDoc.save(); } catch(_){} }
+      try { await finalizeAndNotify(job, sessionDoc); } catch(_){}
+      if (out) await sendWhatsApp(fromWa, out);
+      return res.send('OK');
+    }
+
+    // Default: use model to decide for non-last
     const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
     const action = guidance?.action || 'ask_again';
     let reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
@@ -969,6 +1016,7 @@ app.post('/api/interview/start', async (req, res) => {
         processedMessageSids: [],
         interviewStarted: false,
         pendingQuestion: (job.questions || [])[0] || '',
+        stage: 'awaiting_answer',
         conversationHistory: [
           { role: 'assistant', content: buildWelcomeMessage(job) }
         ]
@@ -1022,9 +1070,17 @@ app.post('/api/interview/webhook', async (req, res) => {
     const job = await Job.findOne({ jobId: sessionDoc.jobId }).lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
+    if (sessionDoc.completedAt || sessionDoc.stage === 'finished') {
+      const msg = buildAlreadyCompletedMessage(job);
+      return res.json({ ok: true, reply: msg, done: true });
+    }
+
     // Maintain conversation history
     sessionDoc.conversationHistory = Array.isArray(sessionDoc.conversationHistory) ? sessionDoc.conversationHistory : [];
     sessionDoc.conversationHistory.push({ role: 'user', content: message });
+    // Mark processing stage
+    sessionDoc.stage = 'processing';
+    await sessionDoc.save().catch(()=>{});
 
     const normalizedMsg = message.normalize('NFKC').toLowerCase();
     const isStart = isStartMessage(job, normalizedMsg);
@@ -1051,6 +1107,7 @@ app.post('/api/interview/webhook', async (req, res) => {
     const idx = sessionDoc.currentIndex || 0;
     if (idx < (job.questions || []).length) {
       const q = job.questions[idx];
+      const isLast = idx === (job.questions || []).length - 1;
 
       // Confirmation-only while waiting → ignore so it doesn't block or repeat
       if (isConfirmationOnly(message)) {
@@ -1058,8 +1115,8 @@ app.post('/api/interview/webhook', async (req, res) => {
         return res.json({ ok: true, reply: '', state: { currentIndex: sessionDoc.currentIndex, started: true } });
       }
 
-      // Clarification intent shortcut
-      if (isClarification(message)) {
+      // Clarification intent shortcut (skip for last question)
+      if (!isLast && isClarification(message)) {
         const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
         const reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
         if (reply) sessionDoc.conversationHistory.push({ role: 'assistant', content: reply });
@@ -1072,7 +1129,7 @@ app.post('/api/interview/webhook', async (req, res) => {
       }
 
       // User asks question → guide politely
-      if (isUserQuestion(message) && !isProbablyAnswer(message)) {
+      if (!isLast && isUserQuestion(message) && !isProbablyAnswer(message)) {
         const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
         const reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
         const fu = guidance?.follow_up_question ? sanitizeAssistantReply(guidance.follow_up_question, job.language) : '';
@@ -1092,7 +1149,41 @@ app.post('/api/interview/webhook', async (req, res) => {
         return res.json({ ok: true, reply: out, state: { currentIndex: sessionDoc.currentIndex, started: true } });
       }
 
-      // Default: use model to decide
+      // Final question: accept only valid answers; finalize immediately
+      if (isLast) {
+        if (!isValidAnswerContent(message)) {
+          const reask = t((job.language || 'en'), 'whatsapp.question_prefix', { current: idx + 1, total: job.questions.length, question: q });
+          sessionDoc.conversationHistory.push({ role: 'assistant', content: reask });
+          sessionDoc.markModified('conversationHistory');
+          await sessionDoc.save();
+          return res.json({ ok: true, reply: reask, state: { currentIndex: idx, started: true } });
+        }
+        sessionDoc.answers = sessionDoc.answers || [];
+        if (sessionDoc.answers.length === idx) {
+          sessionDoc.answers.push({ question: q, answer: message });
+        } else if (sessionDoc.answers.length < idx) {
+          while (sessionDoc.answers.length < idx) sessionDoc.answers.push({ question: '', answer: '' });
+          sessionDoc.answers.push({ question: q, answer: message });
+        }
+        sessionDoc.currentIndex = idx + 1;
+        sessionDoc.completedAt = new Date();
+        sessionDoc.stage = 'finished';
+        let feedback = '';
+        try {
+          const g = await converseOnAnswer({ job, sessionDoc, question: q, message });
+          feedback = sanitizeAssistantReply(g?.assistant_reply || '', job.language);
+        } catch {}
+        const finalMsg = buildFinalMessage(job);
+        const out = [feedback, finalMsg].filter(Boolean).join('\n');
+        sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
+        sessionDoc.markModified('conversationHistory');
+        await sessionDoc.save();
+        const { analysis } = await finalizeAndNotify(job, { ...sessionDoc.toObject(), from: sessionDoc.applicantEmail || sessionDoc.applicantPhone });
+        return res.json({ ok: true, reply: out, done: true, analysis });
+      }
+
+      // Default: use model to decide (non-last)
+      // Default: use model to decide (non-last)
       const guidance = await converseOnAnswer({ job, sessionDoc, question: q, message });
       const action = guidance?.action || 'ask_again';
       const reply = sanitizeAssistantReply(guidance?.assistant_reply || '', job.language);
@@ -1122,6 +1213,7 @@ app.post('/api/interview/webhook', async (req, res) => {
           const finalMsg = buildFinalMessage(job);
           out = [reply, finalMsg].filter(Boolean).join('\n');
           sessionDoc.completedAt = new Date();
+          sessionDoc.stage = 'finished';
           sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
           sessionDoc.markModified('conversationHistory');
           await sessionDoc.save();
@@ -1152,6 +1244,7 @@ app.post('/api/interview/webhook', async (req, res) => {
             const finalMsg = buildFinalMessage(job);
             const out = [reply, finalMsg].filter(Boolean).join('\n');
             sessionDoc.completedAt = new Date();
+            sessionDoc.stage = 'finished';
             sessionDoc.conversationHistory.push({ role: 'assistant', content: out });
             sessionDoc.markModified('conversationHistory');
             await sessionDoc.save();
